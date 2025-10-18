@@ -6,7 +6,7 @@ server tcp ":9001" {
 
     on message {
         log("got message: $message")
-        send("Echo: $message")
+        send("$client: $message")
     }
 
     on disconnect {

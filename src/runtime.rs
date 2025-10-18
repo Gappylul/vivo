@@ -20,25 +20,40 @@ async fn execute_statements(
     socket: &mut tokio::net::TcpStream,
     _addr: &std::net::SocketAddr,
     message: Option<&str>,
+    client: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for stmt in statements {
         match stmt {
             Statement::Log(msg) => {
                 // Replace $message placeholder with actual message
-                let output = if let Some(m) = message {
-                    msg.replace("$message", m)
+                let mut output = msg.clone();
+                if let Some(m) = message {
+                    output = output.replace("$message", m)
                 } else {
-                    msg.clone()
-                };
+                    output = msg.clone();
+                }
+
+                if let Some(c) = client {
+                    output = output.replace("$client", c)
+                } else {
+                    output = msg.clone();
+                }
                 println!("{}", output);
             }
             Statement::Send(msg) => {
                 // Replace $message placeholder with actual message
-                let output = if let Some(m) = message {
-                    msg.replace("$message", m)
+                let mut output = msg.clone();
+                if let Some(m) = message {
+                    output = output.replace("$message", m)
                 } else {
-                    msg.clone()
-                };
+                    output = msg.clone();
+                }
+
+                if let Some(c) = client {
+                    output = output.replace("$client", c)
+                } else {
+                    output = msg.clone();
+                }
                 let msg_with_newline = format!("{}\n", output);
                 socket.write_all(msg_with_newline.as_bytes()).await?;
                 socket.flush().await?;
@@ -68,11 +83,13 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
         let events_clone = Arc::clone(&events);
 
         tokio::spawn(async move {
+            let client_str = addr.port().to_string();
+
             // Handle connect event
             for stmt in events_clone.iter() {
                 if let Statement::On { event, body } = stmt {
                     if event == "connect" {
-                        if let Err(e) = execute_statements(body, &mut socket, &addr, None).await {
+                        if let Err(e) = execute_statements(body, &mut socket, &addr, None, Some(&client_str)).await {
                             eprintln!("Error executing connect handler: {}", e);
                             return;
                         }
@@ -91,7 +108,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                         for stmt in events_clone.iter() {
                             if let Statement::On { event, body } = stmt {
                                 if event == "disconnect" {
-                                    if let Err(e) = execute_statements(body, &mut socket, &addr, None).await {
+                                    if let Err(e) = execute_statements(body, &mut socket, &addr, None, Some(&client_str)).await {
                                         eprintln!("Error executing disconnect handler: {}", e);
                                     }
                                 }
@@ -115,7 +132,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                         for stmt in events_clone.iter() {
                             if let Statement::On { event, body } = stmt {
                                 if event == "message" {
-                                    if let Err(e) = execute_statements(body, &mut socket, &addr, Some(msg_trimmed)).await {
+                                    if let Err(e) = execute_statements(body, &mut socket, &addr, Some(msg_trimmed), Some(&client_str)).await {
                                         eprintln!("Error executing message handler: {}", e);
                                         break;
                                     }
