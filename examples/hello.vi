@@ -1,0 +1,8 @@
+server tcp ":9001" {
+    on connect {
+        log("client joined")
+    }
+    on message {
+        log("got a message")
+    }
+}
