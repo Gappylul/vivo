@@ -86,6 +86,18 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                 match socket.read(&mut buf).await {
                     Ok(0) => {
                         println!("Client {} disconnected", addr);
+
+                        // Trigger "disconnect" events
+                        for stmt in events_clone.iter() {
+                            if let Statement::On { event, body } = stmt {
+                                if event == "disconnect" {
+                                    if let Err(e) = execute_statements(body, &mut socket, &addr, None).await {
+                                        eprintln!("Error executing disconnect handler: {}", e);
+                                    }
+                                }
+                            }
+                        }
+
                         break;
                     }
                     Ok(n) => {
