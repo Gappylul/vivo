@@ -11,4 +11,5 @@ pub enum Statement {
         body: Vec<Statement>,
     },
     Log(String),
+    Send(String),
 }

@@ -29,6 +29,8 @@ pub fn lex(src: &str) -> Vec<Token> {
                     "server" => Token::Server,
                     "tcp" => Token::TCP,
                     "on" => Token::On,
+                    "log" => Token::Log,
+                    "send" => Token::Send,
                     _ => Token::Ident(ident),
                 });
             }

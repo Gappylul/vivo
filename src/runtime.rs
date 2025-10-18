@@ -14,6 +14,41 @@ fn extract_events(body: &[Statement]) -> Vec<Statement> {
     }).collect()
 }
 
+/// Execute event handlers and send responses
+async fn execute_statements(
+    statements: &[Statement],
+    socket: &mut tokio::net::TcpStream,
+    _addr: &std::net::SocketAddr,
+    message: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for stmt in statements {
+        match stmt {
+            Statement::Log(msg) => {
+                // Replace $message placeholder with actual message
+                let output = if let Some(m) = message {
+                    msg.replace("$message", m)
+                } else {
+                    msg.clone()
+                };
+                println!("{}", output);
+            }
+            Statement::Send(msg) => {
+                // Replace $message placeholder with actual message
+                let output = if let Some(m) = message {
+                    msg.replace("$message", m)
+                } else {
+                    msg.clone()
+                };
+                let msg_with_newline = format!("{}\n", output);
+                socket.write_all(msg_with_newline.as_bytes()).await?;
+                socket.flush().await?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
     let events = Arc::new(extract_events(&body));
 
@@ -33,24 +68,13 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
         let events_clone = Arc::clone(&events);
 
         tokio::spawn(async move {
-            // Send welcome message
-            if let Err(e) = socket.write_all(b"Welcome to Vivo!\n").await {
-                eprintln!("Failed to send welcome to {}: {}", addr, e);
-                return;
-            }
-            if let Err(e) = socket.flush().await {
-                eprintln!("Failed to flush welcome to {}: {}", addr, e);
-                return;
-            }
-
-            // Handle connect event logs
+            // Handle connect event
             for stmt in events_clone.iter() {
                 if let Statement::On { event, body } = stmt {
                     if event == "connect" {
-                        for inner in body {
-                            if let Statement::Log(msg) = inner {
-                                println!("[connect] {}", msg);
-                            }
+                        if let Err(e) = execute_statements(body, &mut socket, &addr, None).await {
+                            eprintln!("Error executing connect handler: {}", e);
+                            return;
                         }
                     }
                 }
@@ -79,24 +103,12 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                         for stmt in events_clone.iter() {
                             if let Statement::On { event, body } = stmt {
                                 if event == "message" {
-                                    for inner in body {
-                                        if let Statement::Log(log_msg) = inner {
-                                            println!("[message] {}", log_msg);
-                                        }
+                                    if let Err(e) = execute_statements(body, &mut socket, &addr, Some(msg_trimmed)).await {
+                                        eprintln!("Error executing message handler: {}", e);
+                                        break;
                                     }
                                 }
                             }
-                        }
-
-                        // Echo back
-                        let response = format!("Echo: {}\n", msg_trimmed);
-                        if let Err(e) = socket.write_all(response.as_bytes()).await {
-                            eprintln!("Write error to {}: {}", addr, e);
-                            break;
-                        }
-                        if let Err(e) = socket.flush().await {
-                            eprintln!("Flush error to {}: {}", addr, e);
-                            break;
                         }
                     }
                     Err(e) => {

@@ -1,8 +1,10 @@
 server tcp ":9001" {
     on connect {
         log("client joined")
+        send("Welcome to Vivo!")
     }
     on message {
-        log("got a message")
+        log("got message: $message")
+        send("Echo: $message")
     }
 }

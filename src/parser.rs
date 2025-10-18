@@ -23,12 +23,20 @@ pub fn parse(tokens: Vec<Token>) -> Vec<Statement> {
                                     if let Token::LBrace = tokens[i] {
                                         i += 1;
                                         while !matches!(tokens[i], Token::RBrace | Token::EOF) {
-                                            if let Token::Ident(ident) = &tokens[i] {
-                                                if ident == "log" {
+                                            match &tokens[i] {
+                                                Token::Log => {
                                                     if let Token::String(msg) = &tokens[i + 2] {
                                                         inner.push(Statement::Log(msg.clone()));
                                                     }
+                                                    i += 1;
                                                 }
+                                                Token::Send => {
+                                                    if let Token::String(msg) = &tokens[i + 2] {
+                                                        inner.push(Statement::Send(msg.clone()));
+                                                    }
+                                                    i += 1;
+                                                }
+                                                _ => {}
                                             }
                                             i += 1;
                                         }

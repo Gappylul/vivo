@@ -16,7 +16,6 @@ pub async fn interpret(ast: Vec<Statement>) {
         }
     }
 
-    // Wait for all servers to complete (they won't, but this keeps the program running)
     for handle in handles {
         let _ = handle.await;
     }
