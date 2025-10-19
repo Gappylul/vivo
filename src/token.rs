@@ -15,5 +15,6 @@ pub enum Token {
     Log,
     Send,
     Colon,
+    Comma,
     EOF
 }

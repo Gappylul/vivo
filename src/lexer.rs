@@ -98,7 +98,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 tokens.push(Token::Dot);
                 column += 1;
             }
-
+            ',' => {
+                tokens.push(Token::Comma);
+                column += 1;
+            }
             '"' => {
                 let string_start_line = line;
                 let string_start_column = column;

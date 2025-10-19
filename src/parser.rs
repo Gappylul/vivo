@@ -36,90 +36,90 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
         });
     }
 
-    match &tokens[*i] {
+    // Base expression
+    let mut expr = match &tokens[*i] {
         Token::String(s) => {
-            let expr = Expression::String(s.clone());
             *i += 1;
-            Ok(expr)
+            Expression::String(s.clone())
         }
-
         Token::Variable(v) | Token::Ident(v) => {
-            let mut expr = Expression::Variable(v.clone());
             *i += 1;
+            Expression::Variable(v.clone())
+        }
+        Token::Number(n) => {
+            let value = n.parse().map_err(|_| ParseError::InvalidExpression { position: *i })?;
+            *i += 1;
+            Expression::Number(value)
+        }
+        _ => {
+            return Err(ParseError::UnexpectedToken {
+                expected: "expression".to_string(),
+                found: format!("{:?}", tokens.get(*i)),
+                position: *i,
+            });
+        }
+    };
 
-            // Support chained method calls
-            while *i < tokens.len() && matches!(tokens.get(*i), Some(Token::Dot)) {
-                *i += 1; // skip '.'
+    // Handle chained method calls: .method(...)
+    while *i < tokens.len() && matches!(tokens[*i], Token::Dot) {
+        *i += 1; // skip '.'
 
-                // method name
-                let method = if let Some(Token::Ident(name)) = tokens.get(*i) {
-                    name.clone()
+        // Method name
+        let method = if let Some(Token::Ident(name)) = tokens.get(*i) {
+            name.clone()
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: "method name".to_string(),
+                found: format!("{:?}", tokens.get(*i)),
+                position: *i,
+            });
+        };
+        *i += 1;
+
+        // Optional parentheses for arguments
+        let mut args = Vec::new();
+        if *i < tokens.len() && matches!(tokens[*i], Token::LParen) {
+            *i += 1; // skip '('
+
+            while *i < tokens.len() && !matches!(tokens[*i], Token::RParen) {
+                let arg_expr = parse_expression(tokens, i)?;
+                args.push(arg_expr);
+
+                // Comma between arguments
+                if *i < tokens.len() && matches!(tokens[*i], Token::Comma) {
+                    *i += 1;
                 } else {
-                    return Err(ParseError::UnexpectedToken {
-                        expected: "method name".to_string(),
-                        found: format!("{:?}", tokens.get(*i)),
-                        position: *i,
-                    });
-                };
-                *i += 1;
-
-                // parse optional ( ... ) arguments
-                let mut arg = None;
-                if *i < tokens.len() && matches!(tokens.get(*i), Some(Token::LParen)) {
-                    *i += 1; // skip '('
-
-                    // number argument
-                    if let Some(Token::Number(n)) = tokens.get(*i) {
-                        arg = Some(Box::new(Expression::Number(
-                            n.parse().map_err(|_| ParseError::InvalidExpression {
-                                position: *i,
-                            })?,
-                        )));
-                        *i += 1;
-                    }
-                    // string argument
-                    else if let Some(Token::String(s)) = tokens.get(*i) {
-                        arg = Some(Box::new(Expression::String(s.clone())));
-                        *i += 1;
-                    }
-
-                    // expect ')'
-                    if *i < tokens.len() && matches!(tokens.get(*i), Some(Token::RParen)) {
-                        *i += 1;
-                    } else {
-                        return Err(ParseError::UnexpectedToken {
-                            expected: "')'".to_string(),
-                            found: format!("{:?}", tokens.get(*i)),
-                            position: *i,
-                        });
-                    }
+                    break;
                 }
-
-                expr = Expression::MethodCall {
-                    object: Box::new(expr),
-                    method,
-                    arg,
-                };
             }
 
-            Ok(expr)
+            // Expect closing ')'
+            if *i < tokens.len() && matches!(tokens[*i], Token::RParen) {
+                *i += 1;
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "')'".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
         }
 
-        Token::Number(n) => {
-            *i += 1;
-            Ok(Expression::Number(
-                n.parse().map_err(|_| ParseError::InvalidExpression {
-                    position: *i - 1,
-                })?,
-            ))
-        }
+        // Build MethodCall expression
+        let arg = match args.len() {
+            0 => None,
+            1 => Some(Box::new(args.remove(0))),
+            _ => Some(Box::new(Expression::Tuple(args))),
+        };
 
-        _ => Err(ParseError::UnexpectedToken {
-            expected: "expression".to_string(),
-            found: format!("{:?}", tokens.get(*i)),
-            position: *i,
-        }),
+        expr = Expression::MethodCall {
+            object: Box::new(expr),
+            method,
+            arg,
+        };
     }
+
+    Ok(expr)
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {

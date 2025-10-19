@@ -24,4 +24,5 @@ pub enum Expression {
         method: String,
         arg: Option<Box<Expression>>
     },
+    Tuple(Vec<Expression>)
 }
