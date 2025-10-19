@@ -158,6 +158,19 @@ fn apply_method(
             }
         },
         "is_empty" => base.is_empty().to_string(),
+        "typeof" | "type_of" => {
+            if base.parse::<f64>().is_ok() {
+                "number".to_string()
+            } else if base.starts_with('(') && base.ends_with(')') {
+                "tuple".to_string()
+            } else if base == "true" || base == "false" {
+                "boolean".to_string()
+            } else if base.is_empty() {
+                "empty".to_string()
+            } else {
+                "string".to_string()
+            }
+        },
         unknown => {
             eprintln!("Warning: unknown method '{}'", unknown);
             base.to_string()

@@ -1,5 +1,5 @@
 server tcp ":9007" {
 	on message {
-		send($message.is_empty().remove("true"))
+		send($message.typeof())
 	}
 }
