@@ -2,10 +2,12 @@
 pub enum Token {
     Ident(String),
     String(String),
+    Variable(String),
     LBrace,
     RBrace,
     LParen,
     RParen,
+    Dot,
     On,
     Server,
     TCP,

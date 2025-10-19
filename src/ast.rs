@@ -10,6 +10,16 @@ pub enum Statement {
         event: String,
         body: Vec<Statement>,
     },
-    Log(String),
-    Send(String),
+    Log(Expression),
+    Send(Expression),
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    String(String),
+    Variable(String),
+    MethodCall {
+        object: Box<Expression>,
+        method: String,
+    },
 }

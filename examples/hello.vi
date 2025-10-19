@@ -1,15 +1,15 @@
 server tcp ":9001" {
     on connect {
-        log("client joined")
+        log("Client connected: $client.reverse()")
         send("Welcome to Vivo!")
     }
-
     on message {
-        log("got message: $message")
-        send("$client: $message")
+        log("Received: $message")
+        send("Original: $message")
+        send($message.reverse())
+        send($message.upper())
     }
-
     on disconnect {
-        log("client left")
+        log("Client $client disconnected")
     }
 }
