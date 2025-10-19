@@ -30,11 +30,92 @@ fn apply_method(
             .next()
             .map(|c| c.to_uppercase().collect::<String>() + &base[1..])
             .unwrap_or_default(),
+        "contains" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.contains(arg).to_string()
+            }
+            Some(_) => {
+                eprintln!("Warning: contains requires 1 argument, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: contains called without arguments");
+                base.to_string()
+            }
+        },
+        "starts_with" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.starts_with(arg).to_string()
+            }
+            Some(_) => {
+                eprintln!("Warning: starts_with requires 1 argument, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: starts_with called without arguments");
+                base.to_string()
+            }
+        },
+        "ends_with" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.ends_with(arg).to_string()
+            }
+            Some(_) => {
+                eprintln!("Warning: ends_with requires 1 argument, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: ends_with called without arguments");
+                base.to_string()
+            }
+        },
+        "find" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.find(arg)
+                    .map(|i| i.to_string())
+                    .unwrap_or_else(|| "-1".to_string())
+            }
+            Some(_) => {
+                eprintln!("Warning: find requires 1 argument, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: find called without arguments");
+                base.to_string()
+            }
+        },
         "trim" => base.trim().to_string(),
+        "rtrim" => base.trim_end().to_string(),
+        "ltrim" => base.trim_start().to_string(),
         "repeat" => match arg {
             Some(Expression::Number(n)) => base.repeat(*n as usize),
             _ => base.repeat(2),
         },
+        "repeat_sep" => match arg {
+            Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
+                let times_str = eval_expression(&args_vec[0], message, client);
+                let add = eval_expression(&args_vec[1], message, client);
+
+                let times = times_str.parse::<usize>().unwrap_or(0);
+
+                if times == 0 {
+                    base.to_string()
+                } else {
+                    std::iter::repeat(base)
+                        .take(times)
+                        .collect::<Vec<&str>>()
+                        .join(&add)
+                }
+            }
+            Some(_) => {
+                eprintln!("Warning: repeat_sep requires 2 argument, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: repeat_sep called without arguments");
+                base.to_string()
+            }
+        }
         "replace" => match arg {
             Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
                 let from = eval_expression(&args_vec[0], message, client);
@@ -50,6 +131,33 @@ fn apply_method(
                 base.to_string()
             }
         },
+        "remove" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.replace(arg, "").to_string()
+            }
+            Some(_) => {
+                eprintln!("Warning: remove requires 1 arguments, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: remove called without arguments");
+                base.to_string()
+            }
+        },
+        "count" => match arg {
+            Some(Expression::String(arg)) if arg != "" => {
+                base.matches(arg).count().to_string()
+            }
+            Some(_) => {
+                eprintln!("Warning: count requires 1 arguments, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: count called without arguments");
+                base.to_string()
+            }
+        },
+        "is_empty" => base.is_empty().to_string(),
         unknown => {
             eprintln!("Warning: unknown method '{}'", unknown);
             base.to_string()
