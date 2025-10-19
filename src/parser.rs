@@ -8,59 +8,61 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> Expression {
             *i += 1;
             expr
         }
-        Token::Variable(v) => {
+
+        Token::Variable(v) | Token::Ident(v) => {
             let mut expr = Expression::Variable(v.clone());
             *i += 1;
 
-            // Check for method calls
+            // Support chained method calls
             while matches!(tokens.get(*i), Some(Token::Dot)) {
-                *i += 1; // skip dot
-                if let Token::Ident(method) = &tokens[*i] {
-                    expr = Expression::MethodCall {
-                        object: Box::new(expr),
-                        method: method.clone(),
-                    };
-                    *i += 1;
+                *i += 1; // skip '.'
 
-                    // Skip parentheses if present
-                    if matches!(tokens.get(*i), Some(Token::LParen)) {
+                // method name
+                let method = if let Some(Token::Ident(name)) = tokens.get(*i) {
+                    name.clone()
+                } else {
+                    break;
+                };
+                *i += 1;
+
+                // parse optional ( ... ) arguments
+                let mut arg = None;
+                if matches!(tokens.get(*i), Some(Token::LParen)) {
+                    *i += 1; // skip '('
+
+                    // number argument
+                    if let Some(Token::Number(n)) = tokens.get(*i) {
+                        arg = Some(Box::new(Expression::Number(n.parse().unwrap())));
                         *i += 1;
-                        if matches!(tokens.get(*i), Some(Token::RParen)) {
-                            *i += 1;
-                        }
+                    }
+
+                    // string argument (optional)
+                    else if let Some(Token::String(s)) = tokens.get(*i) {
+                        arg = Some(Box::new(Expression::String(s.clone())));
+                        *i += 1;
+                    }
+
+                    // skip ')'
+                    if matches!(tokens.get(*i), Some(Token::RParen)) {
+                        *i += 1;
                     }
                 }
+
+                expr = Expression::MethodCall {
+                    object: Box::new(expr),
+                    method,
+                    arg,
+                };
             }
 
             expr
         }
-        Token::Ident(name) => {
-            // Treat bare identifiers like "message" as variables
-            let mut expr = Expression::Variable(name.clone());
+
+        Token::Number(n) => {
             *i += 1;
-
-            // Check for method calls
-            while matches!(tokens.get(*i), Some(Token::Dot)) {
-                *i += 1; // skip dot
-                if let Token::Ident(method) = &tokens[*i] {
-                    expr = Expression::MethodCall {
-                        object: Box::new(expr),
-                        method: method.clone(),
-                    };
-                    *i += 1;
-
-                    // Skip parentheses if present
-                    if matches!(tokens.get(*i), Some(Token::LParen)) {
-                        *i += 1;
-                        if matches!(tokens.get(*i), Some(Token::RParen)) {
-                            *i += 1;
-                        }
-                    }
-                }
-            }
-
-            expr
+            Expression::Number(n.parse().unwrap())
         }
+
         _ => {
             *i += 1;
             Expression::String("".to_string())

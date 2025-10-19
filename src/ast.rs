@@ -18,8 +18,10 @@ pub enum Statement {
 pub enum Expression {
     String(String),
     Variable(String),
+    Number(i64),
     MethodCall {
         object: Box<Expression>,
         method: String,
+        arg: Option<Box<Expression>>
     },
 }

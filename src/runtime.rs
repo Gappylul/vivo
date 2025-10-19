@@ -26,7 +26,7 @@ pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<
             _ => format!("${}", v),
         },
 
-        Expression::MethodCall { object, method } => {
+        Expression::MethodCall { object, method, arg } => {
             let base = eval_expression(object, message, client);
             match method.as_str() {
                 "reverse" => base.chars().rev().collect(),
@@ -41,10 +41,21 @@ pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<
                     }
                 },
                 "trim" => base.trim().to_string(),
-                "repeat" => base.repeat(2),
+                "repeat" => {
+                    if let Some(arg) = arg {
+                        if let Expression::Number(n) = **arg {
+                            base.repeat(n as usize)
+                        } else {
+                            base.repeat(2)
+                        }
+                    } else {
+                        base.repeat(2)
+                    }
+                },
                 _ => base,
             }
         }
+        _ => {"".to_string()}
     }
 }
 

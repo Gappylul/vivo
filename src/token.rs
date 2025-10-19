@@ -2,6 +2,7 @@
 pub enum Token {
     Ident(String),
     String(String),
+    Number(String),
     Variable(String),
     LBrace,
     RBrace,

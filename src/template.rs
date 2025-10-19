@@ -22,25 +22,52 @@ fn parse_template_expr(s: &str) -> Expression {
 
     let mut expr = Expression::Variable(var_name);
 
-    // Read optional .method() chains
+    // Read optional .method(...) chains
     while let Some(&c) = chars.peek() {
         if c == '.' {
-            chars.next(); // skip dot
+            chars.next(); // skip '.'
+
+            // Read method name
             let mut method_name = String::new();
             while let Some(&m) = chars.peek() {
-                if m.is_alphanumeric() {
+                if m.is_alphabetic() {
                     method_name.push(m);
                     chars.next();
-                } else if m == '(' || m == ')' {
-                    chars.next(); // skip parentheses
                 } else {
                     break;
+                }
+            }
+
+            // Optional parentheses and argument
+            let mut arg = None;
+            if matches!(chars.peek(), Some('(')) {
+                chars.next(); // skip '('
+
+                // Collect number argument
+                let mut num_str = String::new();
+                while let Some(&n) = chars.peek() {
+                    if n.is_ascii_digit() {
+                        num_str.push(n);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                if !num_str.is_empty() {
+                    arg = Some(Box::new(Expression::Number(num_str.parse().unwrap())));
+                }
+
+                // Skip remaining ')' if present
+                if matches!(chars.peek(), Some(')')) {
+                    chars.next();
                 }
             }
 
             expr = Expression::MethodCall {
                 object: Box::new(expr),
                 method: method_name,
+                arg,
             };
         } else {
             break;

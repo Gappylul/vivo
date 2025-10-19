@@ -97,6 +97,19 @@ pub fn lex(src: &str) -> Vec<Token> {
                 });
             }
 
+            c if c.is_digit(10) => {
+                let mut num = c.to_string();
+                while let Some(&n) = chars.peek() {
+                    if n.is_digit(10) {
+                        num.push(n);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(Token::Number(num));
+            }
+
             _ if c.is_whitespace() => {}
             _ => {}
         }
