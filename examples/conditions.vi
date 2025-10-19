@@ -1,0 +1,13 @@
+server tcp ":9009" {
+	on message {
+		if $message == "admin" {
+			if $client > 5000 {
+				send("Admin from high port")
+			} else {
+				send("Admin from low port")
+			}
+		} else {
+			send("Regular user")
+		}
+    }
+}

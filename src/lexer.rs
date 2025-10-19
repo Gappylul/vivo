@@ -103,8 +103,47 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 column += 1;
             }
             '=' => {
-                tokens.push(Token::Equals);
-                column += 1;
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::EqualsEquals);
+                    column += 2;
+                } else {
+                    tokens.push(Token::Equals);
+                    column += 1;
+                }
+            }
+            '!' => {
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::NotEquals);
+                    column += 2;
+                } else {
+                    return Err(LexError::UnexpectedCharacter {
+                        line,
+                        column,
+                        character: c,
+                    });
+                }
+            }
+            '>' => {
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::GreaterEquals);
+                    column += 2;
+                } else {
+                    tokens.push(Token::GreaterThan);
+                    column += 1;
+                }
+            }
+            '<' => {
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::LessEquals);
+                    column += 2;
+                } else {
+                    tokens.push(Token::LessThan);
+                    column += 1;
+                }
             }
             '"' => {
                 let string_start_line = line;
@@ -193,6 +232,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     "log" => Token::Log,
                     "send" => Token::Send,
                     "set" => Token::Set,
+                    "if" => Token::If,
+                    "else" => Token::Else,
                     _ => Token::Ident(ident),
                 });
             }

@@ -1,4 +1,4 @@
-use crate::ast::{Statement, Expression};
+use crate::ast::{Statement, Expression, BinaryOperator};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
@@ -202,6 +202,41 @@ pub fn eval_expression(
             let base = eval_expression(object, message, client, vars);
             apply_method(&base, method, arg.as_deref(), message, client, vars)
         }
+        Expression::BinaryOp { left, op, right } => {
+            let left_val = eval_expression(left, message, client, vars);
+            let right_val = eval_expression(right, message, client, vars);
+
+            // Try to parse as numbers for comparison
+            let left_num = left_val.parse::<f64>();
+            let right_num = right_val.parse::<f64>();
+
+            let result = match (left_num, right_num) {
+                (Ok(l), Ok(r)) => {
+                    // Numeric comparison
+                    match op {
+                        BinaryOperator::Equal => l == r,
+                        BinaryOperator::NotEqual => l != r,
+                        BinaryOperator::GreaterThan => l > r,
+                        BinaryOperator::LessThan => l < r,
+                        BinaryOperator::GreaterEqual => l >= r,
+                        BinaryOperator::LessEqual => l <= r,
+                    }
+                }
+                _ => {
+                    // String comparison
+                    match op {
+                        BinaryOperator::Equal => left_val == right_val,
+                        BinaryOperator::NotEqual => left_val != right_val,
+                        BinaryOperator::GreaterThan => left_val > right_val,
+                        BinaryOperator::LessThan => left_val < right_val,
+                        BinaryOperator::GreaterEqual => left_val >= right_val,
+                        BinaryOperator::LessEqual => left_val <= right_val,
+                    }
+                }
+            };
+
+            result.to_string()
+        }
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");
             "".to_string()
@@ -210,46 +245,65 @@ pub fn eval_expression(
 }
 
 /// Execute statements for a single event
-async fn execute_statements(
-    statements: &[Statement],
-    socket: &mut tokio::net::TcpStream,
-    addr: &std::net::SocketAddr,
-    message: Option<&str>,
-    client: Option<&str>,
+fn execute_statements<'a>(
+    statements: &'a [Statement],
+    socket: &'a mut tokio::net::TcpStream,
+    addr: &'a std::net::SocketAddr,
+    message: Option<&'a str>,
+    client: Option<&'a str>,
     vars: Variables,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for stmt in statements {
-        match stmt {
-            Statement::SetVar { name, value } => {
-                let vars_read = vars.read().await;
-                let evaluated = eval_expression(value, message, client, &vars_read);
-                drop(vars_read);
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Box<dyn std::error::Error>>> + Send + 'a>> {
+    Box::pin(async move {
+        for stmt in statements {
+            match stmt {
+                Statement::SetVar { name, value } => {
+                    let vars_read = vars.read().await;
+                    let evaluated = eval_expression(value, message, client, &vars_read);
+                    drop(vars_read);
 
-                let mut vars_write = vars.write().await;
-                vars_write.insert(name.clone(), evaluated.clone());
-                drop(vars_write);
+                    let mut vars_write = vars.write().await;
+                    vars_write.insert(name.clone(), evaluated.clone());
+                    drop(vars_write);
 
-                println!("[{}] SET: {} = {}", addr, name, evaluated);
+                    println!("[{}] SET: {} = {}", addr, name, evaluated);
+                }
+                Statement::If { condition, then_body, else_body } => {
+                    let vars_read = vars.read().await;
+                    let condition_result = eval_expression(condition, message, client, &vars_read);
+                    drop(vars_read);
+
+                    // Evaluate condition as boolean
+                    let is_true = condition_result == "true" ||
+                        (condition_result != "false" &&
+                            condition_result != "0" &&
+                            !condition_result.is_empty());
+
+                    if is_true {
+                        execute_statements(then_body, socket, addr, message, client, vars.clone()).await?;
+                    } else if let Some(else_stmts) = else_body {
+                        execute_statements(else_stmts, socket, addr, message, client, vars.clone()).await?;
+                    }
+                }
+                Statement::Log(expr) => {
+                    let vars_read = vars.read().await;
+                    let output = eval_expression(expr, message, client, &vars_read);
+                    drop(vars_read);
+                    println!("[{}] LOG: {}", addr, output);
+                }
+                Statement::Send(expr) => {
+                    let vars_read = vars.read().await;
+                    let output = eval_expression(expr, message, client, &vars_read);
+                    drop(vars_read);
+                    let msg_with_newline = format!("{}\n", output);
+                    socket.write_all(msg_with_newline.as_bytes()).await?;
+                    socket.flush().await?;
+                    println!("[{}] SENT: {}", addr, output);
+                }
+                _ => {}
             }
-            Statement::Log(expr) => {
-                let vars_read = vars.read().await;
-                let output = eval_expression(expr, message, client, &vars_read);
-                drop(vars_read);
-                println!("[{}] LOG: {}", addr, output);
-            }
-            Statement::Send(expr) => {
-                let vars_read = vars.read().await;
-                let output = eval_expression(expr, message, client, &vars_read);
-                drop(vars_read);
-                let msg_with_newline = format!("{}\n", output);
-                socket.write_all(msg_with_newline.as_bytes()).await?;
-                socket.flush().await?;
-                println!("[{}] SENT: {}", addr, output);
-            }
-            _ => {}
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Trigger all events of a certain type

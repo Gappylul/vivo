@@ -1,5 +1,5 @@
 use crate::token::Token;
-use crate::ast::{Statement, Expression};
+use crate::ast::{Statement, Expression, BinaryOperator};
 use std::fmt;
 
 #[derive(Debug)]
@@ -30,6 +30,42 @@ impl std::error::Error for ParseError {}
 type ParseResult<T> = Result<T, ParseError>;
 
 fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    if *i >= tokens.len() {
+        return Err(ParseError::UnexpectedEof {
+            expected: "expression".to_string(),
+        });
+    }
+
+    // Parse base expression
+    let mut expr = parse_primary_expression(tokens, i)?;
+
+    // Check for comparison operators
+    if *i < tokens.len() {
+        let op = match &tokens[*i] {
+            Token::EqualsEquals => Some(BinaryOperator::Equal),
+            Token::NotEquals => Some(BinaryOperator::NotEqual),
+            Token::GreaterThan => Some(BinaryOperator::GreaterThan),
+            Token::LessThan => Some(BinaryOperator::LessThan),
+            Token::GreaterEquals => Some(BinaryOperator::GreaterEqual),
+            Token::LessEquals => Some(BinaryOperator::LessEqual),
+            _ => None,
+        };
+
+        if let Some(operator) = op {
+            *i += 1; // skip operator
+            let right = parse_primary_expression(tokens, i)?;
+            expr = Expression::BinaryOp {
+                left: Box::new(expr),
+                op: operator,
+                right: Box::new(right),
+            };
+        }
+    }
+
+    Ok(expr)
+}
+
+fn parse_primary_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
     if *i >= tokens.len() {
         return Err(ParseError::UnexpectedEof {
             expected: "expression".to_string(),
@@ -122,6 +158,167 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
     Ok(expr)
 }
 
+// Helper function to parse a single statement
+fn parse_single_statement(tokens: &[Token], i: &mut usize) -> ParseResult<Statement> {
+    if *i >= tokens.len() {
+        return Err(ParseError::UnexpectedEof {
+            expected: "statement".to_string(),
+        });
+    }
+
+    match &tokens[*i] {
+        Token::Ident(name) if *i + 1 < tokens.len() && matches!(tokens[*i + 1], Token::Equals) => {
+            let var_name = name.clone();
+            *i += 1;
+            *i += 1;
+            let value = parse_expression(&tokens, i)?;
+            Ok(Statement::SetVar { name: var_name, value })
+        }
+        Token::If => {
+            *i += 1;
+            let condition = parse_expression(&tokens, i)?;
+
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::LBrace) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "'{'".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            let mut then_body = Vec::new();
+            while *i < tokens.len() && !matches!(tokens[*i], Token::RBrace) {
+                then_body.push(parse_single_statement(tokens, i)?);
+            }
+
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::RBrace) {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "'}'".to_string(),
+                });
+            }
+            *i += 1;
+
+            let else_body = if *i < tokens.len() && matches!(tokens[*i], Token::Else) {
+                *i += 1;
+
+                if *i >= tokens.len() || !matches!(tokens[*i], Token::LBrace) {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "'{'".to_string(),
+                        found: format!("{:?}", tokens.get(*i)),
+                        position: *i,
+                    });
+                }
+                *i += 1;
+
+                let mut else_stmts = Vec::new();
+                while *i < tokens.len() && !matches!(tokens[*i], Token::RBrace) {
+                    else_stmts.push(parse_single_statement(tokens, i)?);
+                }
+
+                if *i >= tokens.len() || !matches!(tokens[*i], Token::RBrace) {
+                    return Err(ParseError::UnexpectedEof {
+                        expected: "'}'".to_string(),
+                    });
+                }
+                *i += 1;
+
+                Some(else_stmts)
+            } else {
+                None
+            };
+
+            Ok(Statement::If { condition, then_body, else_body })
+        }
+        Token::Set => {
+            *i += 1;
+            if *i >= tokens.len() {
+                return Err(ParseError::UnexpectedEof {
+                    expected: "variable name".to_string(),
+                });
+            }
+
+            let name = if let Token::Ident(n) = &tokens[*i] {
+                n.clone()
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "variable name".to_string(),
+                    found: format!("{:?}", tokens[*i]),
+                    position: *i,
+                });
+            };
+            *i += 1;
+
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::Equals) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "'='".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            let value = parse_expression(&tokens, i)?;
+            Ok(Statement::SetVar { name, value })
+        }
+        Token::Log => {
+            *i += 1;
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::LParen) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "'('".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            let expr = parse_expression(&tokens, i)?;
+
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::RParen) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "')'".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            Ok(Statement::Log(expr))
+        }
+        Token::Send => {
+            *i += 1;
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::LParen) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "'('".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            let expr = parse_expression(&tokens, i)?;
+
+            if *i >= tokens.len() || !matches!(tokens[*i], Token::RParen) {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "')'".to_string(),
+                    found: format!("{:?}", tokens.get(*i)),
+                    position: *i,
+                });
+            }
+            *i += 1;
+
+            Ok(Statement::Send(expr))
+        }
+        _ => {
+            Err(ParseError::UnexpectedToken {
+                expected: "statement (set, if, log, send)".to_string(),
+                found: format!("{:?}", tokens[*i]),
+                position: *i,
+            })
+        }
+    }
+}
+
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
     let mut stmts = Vec::new();
     let mut i = 0;
@@ -129,16 +326,14 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
     while i < tokens.len() {
         match &tokens[i] {
             Token::Server => {
-                i += 1; // Move past 'server'
+                i += 1;
 
-                // Ensure we have enough tokens
                 if i >= tokens.len() {
                     return Err(ParseError::UnexpectedEof {
                         expected: "protocol (tcp)".to_string(),
                     });
                 }
 
-                // Expect TCP token
                 if !matches!(tokens[i], Token::TCP) {
                     return Err(ParseError::UnexpectedToken {
                         expected: "tcp".to_string(),
@@ -146,9 +341,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                         position: i,
                     });
                 }
-                i += 1; // Move past 'tcp'
+                i += 1;
 
-                // Expect port string
                 if i >= tokens.len() {
                     return Err(ParseError::UnexpectedEof {
                         expected: "port string".to_string(),
@@ -164,9 +358,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                         position: i,
                     });
                 };
-                i += 1; // Move past port
+                i += 1;
 
-                // Expect opening brace
                 if i >= tokens.len() {
                     return Err(ParseError::UnexpectedEof {
                         expected: "'{'".to_string(),
@@ -180,14 +373,13 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                         position: i,
                     });
                 }
-                i += 1; // Move past '{'
+                i += 1;
 
                 let mut body = Vec::new();
 
-                // Parse server body
                 while i < tokens.len() && !matches!(tokens[i], Token::RBrace | Token::EOF) {
                     if let Token::On = tokens[i] {
-                        i += 1; // Move past 'on'
+                        i += 1;
 
                         if i >= tokens.len() {
                             return Err(ParseError::UnexpectedEof {
@@ -204,9 +396,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                                 position: i,
                             });
                         };
-                        i += 1; // Move past event name
+                        i += 1;
 
-                        // Expect opening brace for event block
                         if i >= tokens.len() {
                             return Err(ParseError::UnexpectedEof {
                                 expected: "'{'".to_string(),
@@ -220,142 +411,29 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                                 position: i,
                             });
                         }
-                        i += 1; // Move past '{'
+                        i += 1;
 
                         let mut inner = Vec::new();
 
-                        // Parse event body
-                        loop {
-                            if i >= tokens.len() {
-                                return Err(ParseError::UnexpectedEof {
-                                    expected: "statement or '}'".to_string(),
-                                });
-                            }
+                        // Parse event body using helper function
+                        while i < tokens.len() && !matches!(tokens[i], Token::RBrace | Token::EOF) {
+                            inner.push(parse_single_statement(&tokens, &mut i)?);
+                        }
 
-                            match &tokens[i] {
-                                Token::Ident(name) if i + 1 < tokens.len() && matches!(tokens[i + 1], Token::Equals) => {
-                                    // Variable assignment without 'set' keyword
-                                    let var_name = name.clone();
-                                    i += 1; // Move past ident
-                                    i += 1; // Move past '='
+                        if i >= tokens.len() {
+                            return Err(ParseError::UnexpectedEof {
+                                expected: "'}'".to_string(),
+                            });
+                        }
 
-                                    let value = parse_expression(&tokens, &mut i)?;
-                                    inner.push(Statement::SetVar { name: var_name, value });
-                                }
-                                Token::Set => {
-                                    i += 1;
-                                    if i >= tokens.len() {
-                                        return Err(ParseError::UnexpectedEof {
-                                            expected: "variable name".to_string(),
-                                        });
-                                    }
-
-                                    let name = if let Token::Ident(n) = &tokens[i] {
-                                        n.clone()
-                                    } else {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "variable name".to_string(),
-                                            found: format!("{:?}", tokens[i]),
-                                            position: i,
-                                        });
-                                    };
-                                    i += 1;
-
-                                    if i >= tokens.len() {
-                                        return Err(ParseError::UnexpectedEof {
-                                            expected: "'='".to_string(),
-                                        });
-                                    }
-
-                                    if !matches!(tokens[i], Token::Equals) {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "'='".to_string(),
-                                            found: format!("{:?}", tokens[i]),
-                                            position: i,
-                                        });
-                                    }
-                                    i += 1;
-
-                                    let value = parse_expression(&tokens, &mut i)?;
-                                    inner.push(Statement::SetVar { name, value });
-                                }
-                                Token::Log => {
-                                    i += 1;
-                                    if i >= tokens.len() {
-                                        return Err(ParseError::UnexpectedEof {
-                                            expected: "'('".to_string(),
-                                        });
-                                    }
-
-                                    if !matches!(tokens[i], Token::LParen) {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "'('".to_string(),
-                                            found: format!("{:?}", tokens[i]),
-                                            position: i,
-                                        });
-                                    }
-                                    i += 1;
-
-                                    let expr = parse_expression(&tokens, &mut i)?;
-                                    inner.push(Statement::Log(expr));
-
-                                    if i < tokens.len() && matches!(tokens[i], Token::RParen) {
-                                        i += 1;
-                                    } else {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "')'".to_string(),
-                                            found: format!("{:?}", tokens.get(i)),
-                                            position: i,
-                                        });
-                                    }
-                                }
-                                Token::Send => {
-                                    i += 1;
-                                    if i >= tokens.len() {
-                                        return Err(ParseError::UnexpectedEof {
-                                            expected: "'('".to_string(),
-                                        });
-                                    }
-
-                                    if !matches!(tokens[i], Token::LParen) {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "'('".to_string(),
-                                            found: format!("{:?}", tokens[i]),
-                                            position: i,
-                                        });
-                                    }
-                                    i += 1;
-
-                                    let expr = parse_expression(&tokens, &mut i)?;
-                                    inner.push(Statement::Send(expr));
-
-                                    if i < tokens.len() && matches!(tokens[i], Token::RParen) {
-                                        i += 1;
-                                    } else {
-                                        return Err(ParseError::UnexpectedToken {
-                                            expected: "')'".to_string(),
-                                            found: format!("{:?}", tokens.get(i)),
-                                            position: i,
-                                        });
-                                    }
-                                }
-                                Token::RBrace => {
-                                    i += 1;
-                                    break;
-                                }
-                                Token::EOF => {
-                                    return Err(ParseError::UnexpectedEof {
-                                        expected: "'}'".to_string(),
-                                    });
-                                }
-                                _ => {
-                                    return Err(ParseError::UnexpectedToken {
-                                        expected: "set, log, send, or '}'".to_string(),
-                                        found: format!("{:?}", tokens[i]),
-                                        position: i,
-                                    });
-                                }
-                            }
+                        if matches!(tokens[i], Token::RBrace) {
+                            i += 1;
+                        } else {
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "'}'".to_string(),
+                                found: format!("{:?}", tokens[i]),
+                                position: i,
+                            });
                         }
 
                         body.push(Statement::On {
@@ -371,7 +449,6 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                     }
                 }
 
-                // Expect closing brace for server
                 if i >= tokens.len() {
                     return Err(ParseError::UnexpectedEof {
                         expected: "'}'".to_string(),

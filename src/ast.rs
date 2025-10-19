@@ -16,6 +16,11 @@ pub enum Statement {
         name: String,
         value: Expression,
     },
+    If {
+        condition: Expression,
+        then_body: Vec<Statement>,
+        else_body: Option<Vec<Statement>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -28,5 +33,20 @@ pub enum Expression {
         method: String,
         arg: Option<Box<Expression>>
     },
-    Tuple(Vec<Expression>)
+    Tuple(Vec<Expression>),
+    BinaryOp {
+        left: Box<Expression>,
+        op: BinaryOperator,
+        right: Box<Expression>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinaryOperator {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterEqual,
+    LessEqual,
 }
