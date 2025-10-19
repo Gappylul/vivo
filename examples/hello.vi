@@ -1,12 +1,6 @@
 server tcp ":9001" {
     on connect {
-        log("Client connected: $client.reverse()")
-        send("Welcome to Vivo!")
-    }
-    on message {
-        send("$message.repeat(4).cap()")
-    }
-    on disconnect {
-        log("Client $client disconnected")
+        log("This string never closes")
+        send("Welcome!")
     }
 }

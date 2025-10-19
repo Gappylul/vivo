@@ -20,7 +20,21 @@ async fn main() {
     let src = fs::read_to_string(&args[1])
         .expect("Failed to read source file");
 
-    let tokens = lexer::lex(&src);
-    let ast = parser::parse(tokens);
+    let tokens = match lexer::lex(&src) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            eprintln!("Lexer error: {}", e);
+            return;
+        }
+    };
+
+    let ast = match parser::parse(tokens) {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return;
+        }
+    };
+
     interpreter::interpret(ast).await;
 }

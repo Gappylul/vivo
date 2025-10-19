@@ -1,15 +1,44 @@
 use crate::token::Token;
+use std::fmt;
 
-pub fn lex(src: &str) -> Vec<Token> {
+#[derive(Debug)]
+pub enum LexError {
+    UnterminatedString { line: usize, column: usize },
+    InvalidEscape { line: usize, column: usize, character: char },
+    UnexpectedCharacter { line: usize, column: usize, character: char },
+}
+
+impl fmt::Display for LexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LexError::UnterminatedString { line, column } => {
+                write!(f, "Unterminated string at line {}, column {}", line, column)
+            }
+            LexError::InvalidEscape { line, column, character } => {
+                write!(f, "Invalid escape sequence '\\{}' at line {}, column {}", character, line, column)
+            }
+            LexError::UnexpectedCharacter { line, column, character } => {
+                write!(f, "Unexpected character '{}' at line {}, column {}", character, line, column)
+            }
+        }
+    }
+}
+
+impl std::error::Error for LexError {}
+
+pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
     let mut tokens = Vec::new();
     let mut chars = src.chars().peekable();
+    let mut line = 1;
+    let mut column = 1;
 
-    fn read_ident(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> String {
+    fn read_ident(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>, column: &mut usize) -> String {
         let mut ident = String::new();
         while let Some(&c) = chars.peek() {
             if c.is_alphanumeric() || c == '_' {
                 ident.push(c);
                 chars.next();
+                *column += 1;
             } else {
                 break;
             }
@@ -17,17 +46,25 @@ pub fn lex(src: &str) -> Vec<Token> {
         ident
     }
 
-    fn read_method_chain(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>, s: &mut String) {
+    fn read_method_chain(
+        chars: &mut std::iter::Peekable<impl Iterator<Item = char>>,
+        s: &mut String,
+        column: &mut usize,
+    ) {
         while let Some(&c) = chars.peek() {
             if c == '.' {
                 s.push(c);
-                chars.next(); // skip dot
+                chars.next();
+                *column += 1;
 
                 // Read method name
                 while let Some(&m) = chars.peek() {
                     s.push(m);
                     chars.next();
-                    if m == ')' { break; } // stop at closing paren
+                    *column += 1;
+                    if m == ')' {
+                        break;
+                    }
                 }
             } else {
                 break;
@@ -37,35 +74,81 @@ pub fn lex(src: &str) -> Vec<Token> {
 
     while let Some(c) = chars.next() {
         match c {
-            '{' => tokens.push(Token::LBrace),
-            '}' => tokens.push(Token::RBrace),
-            '(' => tokens.push(Token::LParen),
-            ')' => tokens.push(Token::RParen),
-            ':' => tokens.push(Token::Colon),
-            '.' => tokens.push(Token::Dot),
+            '{' => {
+                tokens.push(Token::LBrace);
+                column += 1;
+            }
+            '}' => {
+                tokens.push(Token::RBrace);
+                column += 1;
+            }
+            '(' => {
+                tokens.push(Token::LParen);
+                column += 1;
+            }
+            ')' => {
+                tokens.push(Token::RParen);
+                column += 1;
+            }
+            ':' => {
+                tokens.push(Token::Colon);
+                column += 1;
+            }
+            '.' => {
+                tokens.push(Token::Dot);
+                column += 1;
+            }
 
             '"' => {
+                let string_start_line = line;
+                let string_start_column = column;
+                column += 1;
                 let mut s = String::new();
+                let mut terminated = false;
 
                 while let Some(ch) = chars.next() {
+                    column += 1;
+
                     match ch {
-                        '"' => break,
+                        '"' => {
+                            terminated = true;
+                            break;
+                        }
+                        '\n' => {
+                            // Strings cannot span multiple lines
+                            return Err(LexError::UnterminatedString {
+                                line: string_start_line,
+                                column: string_start_column,
+                            });
+                        }
                         '\\' => {
                             if let Some(next_ch) = chars.next() {
+                                column += 1;
                                 s.push(match next_ch {
                                     'n' => '\n',
                                     't' => '\t',
                                     'r' => '\r',
                                     '\\' => '\\',
                                     '"' => '"',
-                                    other => other,
+                                    other => {
+                                        return Err(LexError::InvalidEscape {
+                                            line,
+                                            column: column - 1,
+                                            character: other,
+                                        });
+                                    }
+                                });
+                            } else {
+                                return Err(LexError::UnterminatedString {
+                                    line: string_start_line,
+                                    column: string_start_column,
                                 });
                             }
                         }
                         '$' => {
                             let mut var_expr = String::from("$");
-                            var_expr.push_str(&read_ident(&mut chars));
-                            read_method_chain(&mut chars, &mut var_expr);
+                            var_expr.push_str(&read_ident(&mut chars, &mut column));
+                            read_method_chain(&mut chars, &mut var_expr, &mut column);
 
                             s.push_str("{{");
                             s.push_str(&var_expr);
@@ -75,17 +158,26 @@ pub fn lex(src: &str) -> Vec<Token> {
                     }
                 }
 
+                if !terminated {
+                    return Err(LexError::UnterminatedString {
+                        line: string_start_line,
+                        column: string_start_column,
+                    });
+                }
+
                 tokens.push(Token::String(s));
             }
 
             '$' => {
-                let var = String::from(&read_ident(&mut chars));
+                column += 1;
+                let var = String::from(&read_ident(&mut chars, &mut column));
                 tokens.push(Token::Variable(var));
             }
 
             c if c.is_alphabetic() => {
                 let mut ident = String::from(c);
-                ident.push_str(&read_ident(&mut chars));
+                column += 1;
+                ident.push_str(&read_ident(&mut chars, &mut column));
 
                 tokens.push(match ident.as_str() {
                     "server" => Token::Server,
@@ -97,12 +189,14 @@ pub fn lex(src: &str) -> Vec<Token> {
                 });
             }
 
-            c if c.is_digit(10) => {
+            c if c.is_ascii_digit() => {
                 let mut num = c.to_string();
+                column += 1;
                 while let Some(&n) = chars.peek() {
-                    if n.is_digit(10) {
+                    if n.is_ascii_digit() {
                         num.push(n);
                         chars.next();
+                        column += 1;
                     } else {
                         break;
                     }
@@ -110,11 +204,29 @@ pub fn lex(src: &str) -> Vec<Token> {
                 tokens.push(Token::Number(num));
             }
 
-            _ if c.is_whitespace() => {}
-            _ => {}
+            '\n' => {
+                line += 1;
+                column = 1;
+            }
+
+            c if c.is_whitespace() => {
+                column += 1;
+            }
+
+            c => {
+                if c == ',' || c == ';' {
+                    column += 1;
+                } else {
+                    return Err(LexError::UnexpectedCharacter {
+                        line,
+                        column,
+                        character: c,
+                    });
+                }
+            }
         }
     }
 
     tokens.push(Token::EOF);
-    tokens
+    Ok(tokens)
 }
