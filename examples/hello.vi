@@ -4,10 +4,7 @@ server tcp ":9001" {
         send("Welcome to Vivo!")
     }
     on message {
-        log("Received: $message")
-        send("Original: $message")
-        send($message.reverse())
-        send($message.upper())
+        send("$message.repeat().cap()")
     }
     on disconnect {
         log("Client $client disconnected")

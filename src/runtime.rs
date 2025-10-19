@@ -2,6 +2,7 @@ use crate::ast::{Statement, Expression};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
+use crate::template::eval_template;
 
 /// Extract `On` events from the server body
 fn extract_events(body: &[Statement]) -> Vec<Statement> {
@@ -15,66 +16,15 @@ fn extract_events(body: &[Statement]) -> Vec<Statement> {
 }
 
 /// Evaluate an expression to a string
-fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<&str>) -> String {
+pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<&str>) -> String {
     match expr {
-        Expression::String(s) => {
-            // Replace {{variables}} first
-            let mut result = s.clone();
-            result = result.replace("{{$message}}", message.unwrap_or(""));
-            result = result.replace("{{$client}}", client.unwrap_or(""));
+        Expression::String(s) => eval_template(s, message, client),
 
-            // ✅ New logic: detect `$variable.method()` inside the string
-            // Example: "$client.reverse()" → evaluate it properly
-            let mut evaluated = result.clone();
-
-            // Simple regex-like scanning (no regex crate)
-            let parts: Vec<&str> = result.split('$').collect();
-            if parts.len() > 1 {
-                let mut new_string = String::new();
-                new_string.push_str(parts[0]);
-                for p in &parts[1..] {
-                    if let Some((var, rest)) = p.split_once('.') {
-                        let var_val = match var.trim() {
-                            "client" => client.unwrap_or("").to_string(),
-                            "message" => message.unwrap_or("").to_string(),
-                            _ => format!("${}", var.trim()),
-                        };
-
-                        // handle ".reverse()", ".upper()", ".lower()", etc.
-                        if rest.starts_with("reverse()") {
-                            new_string.push_str(&var_val.chars().rev().collect::<String>());
-                            new_string.push_str(&rest["reverse()".len()..]);
-                        } else if rest.starts_with("upper()") {
-                            new_string.push_str(&var_val.to_uppercase());
-                            new_string.push_str(&rest["upper()".len()..]);
-                        } else if rest.starts_with("lower()") {
-                            new_string.push_str(&var_val.to_lowercase());
-                            new_string.push_str(&rest["lower()".len()..]);
-                        } else if rest.starts_with("length()") {
-                            new_string.push_str(&var_val.len().to_string());
-                            new_string.push_str(&rest["length()".len()..]);
-                        } else {
-                            new_string.push('$');
-                            new_string.push_str(p);
-                        }
-                    } else {
-                        new_string.push('$');
-                        new_string.push_str(p);
-                    }
-                }
-                evaluated = new_string;
-            }
-
-            evaluated
-        }
-
-        Expression::Variable(v) => {
-            match v.as_str() {
-                "message" => message.unwrap_or("").to_string(),
-                "client" => client.unwrap_or("").to_string(),
-                _ => format!("${}", v),
-            }
-        }
+        Expression::Variable(v) => match v.as_str() {
+            "message" => message.unwrap_or("").to_string(),
+            "client" => client.unwrap_or("").to_string(),
+            _ => format!("${}", v),
+        },
 
         Expression::MethodCall { object, method } => {
             let base = eval_expression(object, message, client);
@@ -82,13 +32,21 @@ fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<&str
                 "reverse" => base.chars().rev().collect(),
                 "upper" => base.to_uppercase(),
                 "lower" => base.to_lowercase(),
-                "length" => base.len().to_string(),
+                "length" | "len" => base.len().to_string(),
+                "capitalize" | "cap" => {
+                    let mut chars = base.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                },
+                "trim" => base.trim().to_string(),
+                "repeat" => base.repeat(2),
                 _ => base,
             }
         }
     }
 }
-
 
 /// Execute event handlers and send responses
 async fn execute_statements(
