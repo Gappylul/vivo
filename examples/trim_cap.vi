@@ -1,0 +1,5 @@
+server tcp ":9005" {
+    on message {
+        send($message.trim().capitalize()) 
+    }
+}

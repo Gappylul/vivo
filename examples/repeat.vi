@@ -1,0 +1,10 @@
+server tcp ":9003" {
+	on connect {
+		send("Welcome $client!")
+		send("Type something and I'll repeate it.")
+	}
+
+	on message {
+		send($message.repeat(3))
+	}
+}

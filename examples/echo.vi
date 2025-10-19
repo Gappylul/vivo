@@ -1,0 +1,15 @@
+server tcp ":9002" {
+    on connect {
+        log("Client connected: $client")
+        send("Hello $client!")
+    }
+
+    on message {
+        log("Received: $message")
+        send($message.upper())
+    }
+
+    on disconnect {
+        log("$client disconnected")
+    }
+}

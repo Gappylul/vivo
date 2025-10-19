@@ -1,0 +1,6 @@
+server tcp ":9004" {
+    on message {
+        log("Original message: $message")
+        send($message.reverse())
+    }
+}

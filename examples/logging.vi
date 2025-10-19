@@ -1,0 +1,12 @@
+server tcp ":9006" {
+    on connect {
+        log("Client connected at $client")
+        log("Ready to receive messages")
+        send("Welcome!")
+    }
+
+    on message {
+        log("Processing: $message")
+        send($message.len())
+    }
+}
