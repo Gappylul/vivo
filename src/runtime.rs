@@ -6,67 +6,71 @@ use crate::template::eval_template;
 
 /// Extract `On` events from the server body
 fn extract_events(body: &[Statement]) -> Vec<Statement> {
-    body.iter().filter_map(|stmt| match stmt {
-        Statement::On { event, body } => Some(Statement::On {
-            event: event.clone(),
-            body: body.clone(),
-        }),
-        _ => None,
+    body.iter().filter_map(|stmt| {
+        if let Statement::On { event, body } = stmt {
+            Some(Statement::On { event: event.clone(), body: body.clone() })
+        } else { None }
     }).collect()
+}
+
+/// Central helper to apply methods to a string
+fn apply_method(
+    base: &str,
+    method: &str,
+    arg: Option<&Expression>,
+    message: Option<&str>,
+    client: Option<&str>,
+) -> String {
+    match method {
+        "reverse" => base.chars().rev().collect(),
+        "upper" => base.to_uppercase(),
+        "lower" => base.to_lowercase(),
+        "length" | "len" => base.len().to_string(),
+        "capitalize" | "cap" => base.chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + &base[1..])
+            .unwrap_or_default(),
+        "trim" => base.trim().to_string(),
+        "repeat" => match arg {
+            Some(Expression::Number(n)) => base.repeat(*n as usize),
+            _ => base.repeat(2),
+        },
+        "replace" => match arg {
+            Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
+                let from = eval_expression(&args_vec[0], message, client);
+                let to = eval_expression(&args_vec[1], message, client);
+                base.replace(&from, &to)
+            }
+            Some(_) => {
+                eprintln!("Warning: replace requires 2 arguments, got {:?}", arg);
+                base.to_string()
+            }
+            None => {
+                eprintln!("Warning: replace called without arguments");
+                base.to_string()
+            }
+        },
+        unknown => {
+            eprintln!("Warning: unknown method '{}'", unknown);
+            base.to_string()
+        }
+    }
 }
 
 /// Evaluate an expression to a string
 pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<&str>) -> String {
     match expr {
         Expression::String(s) => eval_template(s, message, client),
-
         Expression::Variable(v) => match v.as_str() {
             "message" => message.unwrap_or("").to_string(),
             "client" => client.unwrap_or("").to_string(),
             _ => format!("${}", v),
         },
-
         Expression::Number(n) => n.to_string(),
-
         Expression::MethodCall { object, method, arg } => {
             let base = eval_expression(object, message, client);
-
-            match method.as_str() {
-                "reverse" => base.chars().rev().collect(),
-                "upper" => base.to_uppercase(),
-                "lower" => base.to_lowercase(),
-                "length" | "len" => base.len().to_string(),
-                "capitalize" | "cap" => base.chars()
-                    .next()
-                    .map(|c| c.to_uppercase().collect::<String>() + &base[1..])
-                    .unwrap_or_default(),
-                "trim" => base.trim().to_string(),
-                "repeat" => match arg.as_deref() {
-                    Some(Expression::Number(n)) => base.repeat(*n as usize),
-                    _ => base.repeat(2),
-                },
-                "replace" => match arg.as_deref() {
-                    Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
-                        let from = eval_expression(&args_vec[0], message, client);
-                        let to = eval_expression(&args_vec[1], message, client);
-                        base.replace(&from, &to)
-                    }
-                    Some(_) => {
-                        eprintln!("Warning: replace requires a tuple of 2 expressions, got {:?}", arg);
-                        base
-                    }
-                    None => {
-                        eprintln!("Warning: replace called without arguments");
-                        base
-                    }
-                },
-                unknown => {
-                    eprintln!("Warning: unknown method '{}'", unknown);
-                    base
-                }
-            }
+            apply_method(&base, method, arg.as_deref(), message, client)
         }
-
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");
             "".to_string()
@@ -74,7 +78,7 @@ pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<
     }
 }
 
-/// Execute event handlers and send responses
+/// Execute statements for a single event
 async fn execute_statements(
     statements: &[Statement],
     socket: &mut tokio::net::TcpStream,
@@ -101,6 +105,26 @@ async fn execute_statements(
     Ok(())
 }
 
+/// Trigger all events of a certain type
+async fn trigger_event(
+    events: &[Statement],
+    event_name: &str,
+    socket: &mut tokio::net::TcpStream,
+    addr: &std::net::SocketAddr,
+    message: Option<&str>,
+    client: Option<&str>,
+) {
+    for stmt in events {
+        if let Statement::On { event, body } = stmt {
+            if event == event_name {
+                if let Err(e) = execute_statements(body, socket, addr, message, client).await {
+                    eprintln!("[{}] Error executing '{}' handler: {}", addr, event_name, e);
+                }
+            }
+        }
+    }
+}
+
 /// Run the TCP server
 pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
     let events = Arc::new(extract_events(&body));
@@ -112,9 +136,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
     };
     println!("Vivo TCP server listening on {}", port_str);
 
-    let listener = TcpListener::bind(&port_str)
-        .await
-        .expect("Failed to bind");
+    let listener = TcpListener::bind(&port_str).await.expect("Failed to bind");
 
     loop {
         let (mut socket, addr) = listener.accept().await.unwrap();
@@ -126,19 +148,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
             let client_str = addr.port().to_string();
 
             // Trigger "connect" events
-            for stmt in events_clone.iter() {
-                if let Statement::On { event, body } = stmt {
-                    if event == "connect" {
-                        if let Err(e) =
-                            execute_statements(body, &mut socket, &addr, None, Some(&client_str))
-                                .await
-                        {
-                            eprintln!("[{}] Error executing connect handler: {}", addr, e);
-                            return;
-                        }
-                    }
-                }
-            }
+            trigger_event(&events_clone, "connect", &mut socket, &addr, None, Some(&client_str)).await;
 
             let mut buf = vec![0u8; 1024];
 
@@ -146,29 +156,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                 match socket.read(&mut buf).await {
                     Ok(0) => {
                         println!("Client {} disconnected", addr);
-
-                        // Trigger "disconnect" events
-                        for stmt in events_clone.iter() {
-                            if let Statement::On { event, body } = stmt {
-                                if event == "disconnect" {
-                                    if let Err(e) = execute_statements(
-                                        body,
-                                        &mut socket,
-                                        &addr,
-                                        None,
-                                        Some(&client_str),
-                                    )
-                                        .await
-                                    {
-                                        eprintln!(
-                                            "[{}] Error executing disconnect handler: {}",
-                                            addr, e
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
+                        trigger_event(&events_clone, "disconnect", &mut socket, &addr, None, Some(&client_str)).await;
                         break;
                     }
                     Ok(n) => {
@@ -181,29 +169,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                         };
                         let msg_trimmed = msg.trim_end_matches(&['\r', '\n'][..]);
                         println!("[{}] RECEIVED: {}", addr, msg_trimmed);
-
-                        // Trigger "message" events
-                        for stmt in events_clone.iter() {
-                            if let Statement::On { event, body } = stmt {
-                                if event == "message" {
-                                    if let Err(e) = execute_statements(
-                                        body,
-                                        &mut socket,
-                                        &addr,
-                                        Some(msg_trimmed),
-                                        Some(&client_str),
-                                    )
-                                        .await
-                                    {
-                                        eprintln!(
-                                            "[{}] Error executing message handler: {}",
-                                            addr, e
-                                        );
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                        trigger_event(&events_clone, "message", &mut socket, &addr, Some(msg_trimmed), Some(&client_str)).await;
                     }
                     Err(e) => {
                         eprintln!("[{}] Read error: {}", addr, e);

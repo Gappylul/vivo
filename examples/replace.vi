@@ -1,5 +1,5 @@
 server tcp ":9007" {
 	on message {
-		send($message.replace("asd", "dsa"))
+		send($message.replace("asd", "dsa").upper().repeat(4))
 	}
 }
