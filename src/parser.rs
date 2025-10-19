@@ -233,6 +233,52 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                             }
 
                             match &tokens[i] {
+                                Token::Ident(name) if i + 1 < tokens.len() && matches!(tokens[i + 1], Token::Equals) => {
+                                    // Variable assignment without 'set' keyword
+                                    let var_name = name.clone();
+                                    i += 1; // Move past ident
+                                    i += 1; // Move past '='
+
+                                    let value = parse_expression(&tokens, &mut i)?;
+                                    inner.push(Statement::SetVar { name: var_name, value });
+                                }
+                                Token::Set => {
+                                    i += 1;
+                                    if i >= tokens.len() {
+                                        return Err(ParseError::UnexpectedEof {
+                                            expected: "variable name".to_string(),
+                                        });
+                                    }
+
+                                    let name = if let Token::Ident(n) = &tokens[i] {
+                                        n.clone()
+                                    } else {
+                                        return Err(ParseError::UnexpectedToken {
+                                            expected: "variable name".to_string(),
+                                            found: format!("{:?}", tokens[i]),
+                                            position: i,
+                                        });
+                                    };
+                                    i += 1;
+
+                                    if i >= tokens.len() {
+                                        return Err(ParseError::UnexpectedEof {
+                                            expected: "'='".to_string(),
+                                        });
+                                    }
+
+                                    if !matches!(tokens[i], Token::Equals) {
+                                        return Err(ParseError::UnexpectedToken {
+                                            expected: "'='".to_string(),
+                                            found: format!("{:?}", tokens[i]),
+                                            position: i,
+                                        });
+                                    }
+                                    i += 1;
+
+                                    let value = parse_expression(&tokens, &mut i)?;
+                                    inner.push(Statement::SetVar { name, value });
+                                }
                                 Token::Log => {
                                     i += 1;
                                     if i >= tokens.len() {
@@ -304,7 +350,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, ParseError> {
                                 }
                                 _ => {
                                     return Err(ParseError::UnexpectedToken {
-                                        expected: "log, send, or '}'".to_string(),
+                                        expected: "set, log, send, or '}'".to_string(),
                                         found: format!("{:?}", tokens[i]),
                                         position: i,
                                     });

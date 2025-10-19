@@ -12,6 +12,10 @@ pub enum Statement {
     },
     Log(Expression),
     Send(Expression),
+    SetVar {
+        name: String,
+        value: Expression,
+    },
 }
 
 #[derive(Debug, Clone)]

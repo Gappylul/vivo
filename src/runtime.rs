@@ -2,7 +2,11 @@ use crate::ast::{Statement, Expression};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 use crate::template::eval_template;
+
+type Variables = Arc<RwLock<HashMap<String, String>>>;
 
 /// Extract `On` events from the server body
 fn extract_events(body: &[Statement]) -> Vec<Statement> {
@@ -20,6 +24,7 @@ fn apply_method(
     arg: Option<&Expression>,
     message: Option<&str>,
     client: Option<&str>,
+    vars: &HashMap<String, String>,
 ) -> String {
     match method {
         "reverse" => base.chars().rev().collect(),
@@ -93,8 +98,8 @@ fn apply_method(
         },
         "repeat_sep" => match arg {
             Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
-                let times_str = eval_expression(&args_vec[0], message, client);
-                let add = eval_expression(&args_vec[1], message, client);
+                let times_str = eval_expression(&args_vec[0], message, client, vars);
+                let add = eval_expression(&args_vec[1], message, client, vars);
 
                 let times = times_str.parse::<usize>().unwrap_or(0);
 
@@ -118,8 +123,8 @@ fn apply_method(
         }
         "replace" => match arg {
             Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
-                let from = eval_expression(&args_vec[0], message, client);
-                let to = eval_expression(&args_vec[1], message, client);
+                let from = eval_expression(&args_vec[0], message, client, vars);
+                let to = eval_expression(&args_vec[1], message, client, vars);
                 base.replace(&from, &to)
             }
             Some(_) => {
@@ -179,18 +184,23 @@ fn apply_method(
 }
 
 /// Evaluate an expression to a string
-pub fn eval_expression(expr: &Expression, message: Option<&str>, client: Option<&str>) -> String {
+pub fn eval_expression(
+    expr: &Expression,
+    message: Option<&str>,
+    client: Option<&str>,
+    vars: &HashMap<String, String>,
+) -> String {
     match expr {
-        Expression::String(s) => eval_template(s, message, client),
+        Expression::String(s) => eval_template(s, message, client, vars),
         Expression::Variable(v) => match v.as_str() {
             "message" => message.unwrap_or("").to_string(),
             "client" => client.unwrap_or("").to_string(),
-            _ => format!("${}", v),
+            _ => vars.get(v).cloned().unwrap_or_else(|| format!("${}", v)),
         },
         Expression::Number(n) => n.to_string(),
         Expression::MethodCall { object, method, arg } => {
-            let base = eval_expression(object, message, client);
-            apply_method(&base, method, arg.as_deref(), message, client)
+            let base = eval_expression(object, message, client, vars);
+            apply_method(&base, method, arg.as_deref(), message, client, vars)
         }
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");
@@ -206,15 +216,31 @@ async fn execute_statements(
     addr: &std::net::SocketAddr,
     message: Option<&str>,
     client: Option<&str>,
+    vars: Variables,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for stmt in statements {
         match stmt {
+            Statement::SetVar { name, value } => {
+                let vars_read = vars.read().await;
+                let evaluated = eval_expression(value, message, client, &vars_read);
+                drop(vars_read);
+
+                let mut vars_write = vars.write().await;
+                vars_write.insert(name.clone(), evaluated.clone());
+                drop(vars_write);
+
+                println!("[{}] SET: {} = {}", addr, name, evaluated);
+            }
             Statement::Log(expr) => {
-                let output = eval_expression(expr, message, client);
+                let vars_read = vars.read().await;
+                let output = eval_expression(expr, message, client, &vars_read);
+                drop(vars_read);
                 println!("[{}] LOG: {}", addr, output);
             }
             Statement::Send(expr) => {
-                let output = eval_expression(expr, message, client);
+                let vars_read = vars.read().await;
+                let output = eval_expression(expr, message, client, &vars_read);
+                drop(vars_read);
                 let msg_with_newline = format!("{}\n", output);
                 socket.write_all(msg_with_newline.as_bytes()).await?;
                 socket.flush().await?;
@@ -234,11 +260,12 @@ async fn trigger_event(
     addr: &std::net::SocketAddr,
     message: Option<&str>,
     client: Option<&str>,
+    vars: Variables,
 ) {
     for stmt in events {
         if let Statement::On { event, body } = stmt {
             if event == event_name {
-                if let Err(e) = execute_statements(body, socket, addr, message, client).await {
+                if let Err(e) = execute_statements(body, socket, addr, message, client, vars.clone()).await {
                     eprintln!("[{}] Error executing '{}' handler: {}", addr, event_name, e);
                 }
             }
@@ -267,9 +294,10 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
 
         tokio::spawn(async move {
             let client_str = addr.port().to_string();
+            let vars: Variables = Arc::new(RwLock::new(HashMap::new()));
 
             // Trigger "connect" events
-            trigger_event(&events_clone, "connect", &mut socket, &addr, None, Some(&client_str)).await;
+            trigger_event(&events_clone, "connect", &mut socket, &addr, None, Some(&client_str), vars.clone()).await;
 
             let mut buf = vec![0u8; 1024];
 
@@ -277,7 +305,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                 match socket.read(&mut buf).await {
                     Ok(0) => {
                         println!("Client {} disconnected", addr);
-                        trigger_event(&events_clone, "disconnect", &mut socket, &addr, None, Some(&client_str)).await;
+                        trigger_event(&events_clone, "disconnect", &mut socket, &addr, None, Some(&client_str), vars.clone()).await;
                         break;
                     }
                     Ok(n) => {
@@ -290,7 +318,7 @@ pub async fn run_server(_protocol: &str, port: &str, body: Vec<Statement>) {
                         };
                         let msg_trimmed = msg.trim_end_matches(&['\r', '\n'][..]);
                         println!("[{}] RECEIVED: {}", addr, msg_trimmed);
-                        trigger_event(&events_clone, "message", &mut socket, &addr, Some(msg_trimmed), Some(&client_str)).await;
+                        trigger_event(&events_clone, "message", &mut socket, &addr, Some(msg_trimmed), Some(&client_str), vars.clone()).await;
                     }
                     Err(e) => {
                         eprintln!("[{}] Read error: {}", addr, e);

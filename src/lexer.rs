@@ -102,6 +102,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 tokens.push(Token::Comma);
                 column += 1;
             }
+            '=' => {
+                tokens.push(Token::Equals);
+                column += 1;
+            }
             '"' => {
                 let string_start_line = line;
                 let string_start_column = column;
@@ -188,6 +192,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     "on" => Token::On,
                     "log" => Token::Log,
                     "send" => Token::Send,
+                    "set" => Token::Set,
                     _ => Token::Ident(ident),
                 });
             }

@@ -14,6 +14,8 @@ pub enum Token {
     TCP,
     Log,
     Send,
+    Set,
+    Equals,
     Colon,
     Comma,
     EOF

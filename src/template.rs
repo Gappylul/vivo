@@ -1,5 +1,6 @@
 use crate::ast::{Expression};
 use crate::runtime::eval_expression;
+use std::collections::HashMap;
 
 fn parse_template_expr(s: &str) -> Expression {
     let mut chars = s.chars().peekable();
@@ -77,7 +78,12 @@ fn parse_template_expr(s: &str) -> Expression {
     expr
 }
 
-pub fn eval_template(s: &str, message: Option<&str>, client: Option<&str>) -> String {
+pub fn eval_template(
+    s: &str,
+    message: Option<&str>,
+    client: Option<&str>,
+    vars: &HashMap<String, String>,
+) -> String {
     let mut result = String::new();
     let mut remaining = s;
 
@@ -88,7 +94,7 @@ pub fn eval_template(s: &str, message: Option<&str>, client: Option<&str>) -> St
         if let Some(end) = after.find("}}") {
             let expr_str = &after[2..end];
             let expr = parse_template_expr(expr_str);
-            let evaluated = eval_expression(&expr, message, client);
+            let evaluated = eval_expression(&expr, message, client, vars);
             result.push_str(&evaluated);
             remaining = &after[end + 2..];
         } else {
@@ -100,4 +106,3 @@ pub fn eval_template(s: &str, message: Option<&str>, client: Option<&str>) -> St
     result.push_str(remaining);
     result
 }
-

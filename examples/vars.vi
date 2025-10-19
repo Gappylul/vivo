@@ -1,0 +1,14 @@
+server tcp ":9008" {
+	on connect {
+		set name = "Guest"
+		send("Your name now: $name")
+		log("Client connected")
+	}
+
+	on message {
+		name = $message
+		log("Name set to: $name")
+		send("Hello, $name!")
+		send("Your name in uppercase: $name.upper()")
+	}
+}
