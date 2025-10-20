@@ -112,10 +112,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     column += 1;
                 }
             }
-            '!' => {
-                if let Some(&'=') = chars.peek() {
+            '&' => {
+                if let Some(&'&') = chars.peek() {
                     chars.next();
-                    tokens.push(Token::NotEquals);
+                    tokens.push(Token::And);
                     column += 2;
                 } else {
                     return Err(LexError::UnexpectedCharacter {
@@ -123,6 +123,29 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                         column,
                         character: c,
                     });
+                }
+            }
+            '|' => {
+                if let Some(&'|') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::Or);
+                    column += 2;
+                } else {
+                    return Err(LexError::UnexpectedCharacter {
+                        line,
+                        column,
+                        character: c,
+                    });
+                }
+            }
+            '!' => {
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::NotEquals);
+                    column += 2;
+                } else {
+                    tokens.push(Token::Not);
+                    column += 1;
                 }
             }
             '>' => {

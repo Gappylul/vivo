@@ -19,6 +19,7 @@ pub enum Statement {
     If {
         condition: Expression,
         then_body: Vec<Statement>,
+        else_ifs: Vec<(Expression, Vec<Statement>)>,
         else_body: Option<Vec<Statement>>,
     },
 }
@@ -39,6 +40,15 @@ pub enum Expression {
         op: BinaryOperator,
         right: Box<Expression>,
     },
+    LogicalOp {
+        left: Box<Expression>,
+        op: LogicalOperator,
+        right: Box<Expression>,
+    },
+    UnaryOp {
+        op: UnaryOperator,
+        operand: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,4 +59,15 @@ pub enum BinaryOperator {
     LessThan,
     GreaterEqual,
     LessEqual,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOperator {
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOperator {
+    Not,
 }

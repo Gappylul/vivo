@@ -24,6 +24,9 @@ pub enum Token {
     LessThan,
     GreaterEquals,
     LessEquals,
+    And,
+    Or,
+    Not,
     Colon,
     Comma,
     EOF

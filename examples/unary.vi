@@ -1,0 +1,33 @@
+server tcp ":8080" {
+    on message {
+        log("=== Testing: $message ===")
+
+        if $message == "test1" {
+            send("Test 1 passed")
+        } else if $message == "test2" {
+            send("Test 2 passed")
+        } else if $message == "test3" {
+            send("Test 3 passed")
+        } else {
+            send("No test matched")
+        }
+
+        if !$message.is_empty() {
+            log("Message is NOT empty: $message")
+        }
+
+        if $message == "admin" && $message.length() > 3 {
+            send("AND: Admin command accepted")
+        }
+
+        if $message == "quit" || $message == "exit" {
+            send("OR: Goodbye!")
+        }
+
+        if $message.starts_with("cmd") && $message.length() > 5 {
+            send("Complex: Command with sufficient length")
+        }
+
+        log("=== Done ===")
+    }
+}

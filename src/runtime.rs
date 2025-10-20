@@ -1,4 +1,4 @@
-use crate::ast::{Statement, Expression, BinaryOperator};
+use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
@@ -48,7 +48,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "starts_with" | "startsWith" => match arg {
+        "starts_with" => match arg {
             Some(Expression::String(arg)) if arg != "" => {
                 base.starts_with(arg).to_string()
             }
@@ -61,7 +61,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "ends_with" | "endsWith" => match arg {
+        "ends_with" => match arg {
             Some(Expression::String(arg)) if arg != "" => {
                 base.ends_with(arg).to_string()
             }
@@ -96,7 +96,7 @@ fn apply_method(
             Some(Expression::Number(n)) => base.repeat(*n as usize),
             _ => base.repeat(2),
         },
-        "repeat_sep" | "repeatSep" => match arg {
+        "repeat_sep" => match arg {
             Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
                 let times_str = eval_expression(&args_vec[0], message, client, vars);
                 let add = eval_expression(&args_vec[1], message, client, vars);
@@ -162,7 +162,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "is_empty" | "isEmpty" => base.is_empty().to_string(),
+        "is_empty" => base.is_empty().to_string(),
         "typeof" | "type_of" => {
             if base.parse::<f64>().is_ok() {
                 "number".to_string()
@@ -181,6 +181,11 @@ fn apply_method(
             base.to_string()
         }
     }
+}
+
+// Helper function to evaluate truthiness
+fn is_truthy(s: &str) -> bool {
+    s == "true" || (s != "false" && s != "0" && !s.is_empty())
 }
 
 /// Evaluate an expression to a string
@@ -237,6 +242,38 @@ pub fn eval_expression(
 
             result.to_string()
         }
+        Expression::LogicalOp { left, op, right } => {
+            let left_val = eval_expression(left, message, client, vars);
+            let left_bool = is_truthy(&left_val);
+
+            // Short-circuit evaluation
+            let result = match op {
+                LogicalOperator::And => {
+                    if !left_bool {
+                        false
+                    } else {
+                        let right_val = eval_expression(right, message, client, vars);
+                        is_truthy(&right_val)
+                    }
+                }
+                LogicalOperator::Or => {
+                    if left_bool {
+                        true
+                    } else {
+                        let right_val = eval_expression(right, message, client, vars);
+                        is_truthy(&right_val)
+                    }
+                }
+            };
+
+            result.to_string()
+        }
+        Expression::UnaryOp { op, operand } => {
+            let val = eval_expression(operand, message, client, vars);
+            match op {
+                UnaryOperator::Not => (!is_truthy(&val)).to_string(),
+            }
+        }
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");
             "".to_string()
@@ -267,21 +304,36 @@ fn execute_statements<'a>(
 
                     println!("[{}] SET: {} = {}", addr, name, evaluated);
                 }
-                Statement::If { condition, then_body, else_body } => {
+                Statement::If { condition, then_body, else_ifs, else_body } => {
                     let vars_read = vars.read().await;
                     let condition_result = eval_expression(condition, message, client, &vars_read);
                     drop(vars_read);
 
-                    // Evaluate condition as boolean
-                    let is_true = condition_result == "true" ||
-                        (condition_result != "false" &&
-                            condition_result != "0" &&
-                            !condition_result.is_empty());
+                    let is_true = is_truthy(&condition_result);
 
                     if is_true {
                         execute_statements(then_body, socket, addr, message, client, vars.clone()).await?;
-                    } else if let Some(else_stmts) = else_body {
-                        execute_statements(else_stmts, socket, addr, message, client, vars.clone()).await?;
+                    } else {
+                        // Check else if conditions
+                        let mut executed = false;
+                        for (else_if_cond, else_if_body) in else_ifs {
+                            let vars_read = vars.read().await;
+                            let else_if_result = eval_expression(else_if_cond, message, client, &vars_read);
+                            drop(vars_read);
+
+                            if is_truthy(&else_if_result) {
+                                execute_statements(else_if_body, socket, addr, message, client, vars.clone()).await?;
+                                executed = true;
+                                break;
+                            }
+                        }
+
+                        // If no else if matched, execute else block
+                        if !executed {
+                            if let Some(else_stmts) = else_body {
+                                execute_statements(else_stmts, socket, addr, message, client, vars.clone()).await?;
+                            }
+                        }
                     }
                 }
                 Statement::Log(expr) => {

@@ -1,5 +1,5 @@
 use crate::token::Token;
-use crate::ast::{Statement, Expression, BinaryOperator};
+use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator};
 use std::fmt;
 
 #[derive(Debug)]
@@ -30,6 +30,42 @@ impl std::error::Error for ParseError {}
 type ParseResult<T> = Result<T, ParseError>;
 
 fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    parse_logical_or(tokens, i)
+}
+
+fn parse_logical_or(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    let mut left = parse_logical_and(tokens, i)?;
+
+    while *i < tokens.len() && matches!(tokens[*i], Token::Or) {
+        *i += 1; // skip '||'
+        let right = parse_logical_and(tokens, i)?;
+        left = Expression::LogicalOp {
+            left: Box::new(left),
+            op: LogicalOperator::Or,
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
+}
+
+fn parse_logical_and(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    let mut left = parse_comparison(tokens, i)?;
+
+    while *i < tokens.len() && matches!(tokens[*i], Token::And) {
+        *i += 1; // skip '&&'
+        let right = parse_comparison(tokens, i)?;
+        left = Expression::LogicalOp {
+            left: Box::new(left),
+            op: LogicalOperator::And,
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
+}
+
+fn parse_comparison(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
     if *i >= tokens.len() {
         return Err(ParseError::UnexpectedEof {
             expected: "expression".to_string(),
@@ -37,7 +73,7 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
     }
 
     // Parse base expression
-    let mut expr = parse_primary_expression(tokens, i)?;
+    let mut expr = parse_unary(tokens, i)?;
 
     // Check for comparison operators
     if *i < tokens.len() {
@@ -53,7 +89,7 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
 
         if let Some(operator) = op {
             *i += 1; // skip operator
-            let right = parse_primary_expression(tokens, i)?;
+            let right = parse_unary(tokens, i)?;
             expr = Expression::BinaryOp {
                 left: Box::new(expr),
                 op: operator,
@@ -65,11 +101,47 @@ fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
     Ok(expr)
 }
 
+fn parse_unary(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    if *i >= tokens.len() {
+        return Err(ParseError::UnexpectedEof {
+            expected: "expression".to_string(),
+        });
+    }
+
+    // Check for unary NOT operator
+    if matches!(tokens[*i], Token::Not) {
+        *i += 1; // skip '!'
+        let operand = parse_unary(tokens, i)?;
+        return Ok(Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            operand: Box::new(operand),
+        });
+    }
+
+    parse_primary_expression(tokens, i)
+}
+
 fn parse_primary_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
     if *i >= tokens.len() {
         return Err(ParseError::UnexpectedEof {
             expected: "expression".to_string(),
         });
+    }
+
+    // Handle parentheses
+    if matches!(tokens[*i], Token::LParen) {
+        *i += 1; // skip '('
+        let expr = parse_expression(tokens, i)?;
+
+        if *i >= tokens.len() || !matches!(tokens[*i], Token::RParen) {
+            return Err(ParseError::UnexpectedToken {
+                expected: "')'".to_string(),
+                found: format!("{:?}", tokens.get(*i)),
+                position: *i,
+            });
+        }
+        *i += 1; // skip ')'
+        return Ok(expr);
     }
 
     // Base expression
@@ -199,6 +271,45 @@ fn parse_single_statement(tokens: &[Token], i: &mut usize) -> ParseResult<Statem
             }
             *i += 1;
 
+            // Parse else if chains
+            let mut else_ifs = Vec::new();
+            while *i < tokens.len() && matches!(tokens[*i], Token::Else) {
+                // Peek ahead to see if it's "else if" or just "else"
+                if *i + 1 < tokens.len() && matches!(tokens[*i + 1], Token::If) {
+                    *i += 1; // skip 'else'
+                    *i += 1; // skip 'if'
+
+                    let else_if_condition = parse_expression(&tokens, i)?;
+
+                    if *i >= tokens.len() || !matches!(tokens[*i], Token::LBrace) {
+                        return Err(ParseError::UnexpectedToken {
+                            expected: "'{'".to_string(),
+                            found: format!("{:?}", tokens.get(*i)),
+                            position: *i,
+                        });
+                    }
+                    *i += 1;
+
+                    let mut else_if_body = Vec::new();
+                    while *i < tokens.len() && !matches!(tokens[*i], Token::RBrace) {
+                        else_if_body.push(parse_single_statement(tokens, i)?);
+                    }
+
+                    if *i >= tokens.len() || !matches!(tokens[*i], Token::RBrace) {
+                        return Err(ParseError::UnexpectedEof {
+                            expected: "'}'".to_string(),
+                        });
+                    }
+                    *i += 1;
+
+                    else_ifs.push((else_if_condition, else_if_body));
+                } else {
+                    // It's just "else", not "else if"
+                    break;
+                }
+            }
+
+            // Parse final else block
             let else_body = if *i < tokens.len() && matches!(tokens[*i], Token::Else) {
                 *i += 1;
 
@@ -228,7 +339,7 @@ fn parse_single_statement(tokens: &[Token], i: &mut usize) -> ParseResult<Statem
                 None
             };
 
-            Ok(Statement::If { condition, then_body, else_body })
+            Ok(Statement::If { condition, then_body, else_ifs, else_body })
         }
         Token::Set => {
             *i += 1;
