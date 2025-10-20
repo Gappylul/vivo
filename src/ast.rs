@@ -49,6 +49,10 @@ pub enum Expression {
         op: UnaryOperator,
         operand: Box<Expression>,
     },
+    Concat {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

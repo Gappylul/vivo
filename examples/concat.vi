@@ -1,0 +1,23 @@
+server tcp ":9002" {
+    on connect {
+        log("Client connected: " + $client + "!")
+        send("Hello $client!")
+    }
+
+    on message {
+        set name = $message
+        // Inline style (evaluates template)
+        send("Hello $name!")
+
+        // Concatenation style
+        send("Hello " + name + "!")
+
+        // Mix both
+        set prefix = "User"
+        send(prefix + " is: $name")
+    }
+
+    on disconnect {
+        log("$client disconnected")
+    }
+}

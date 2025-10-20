@@ -27,6 +27,7 @@ pub enum Token {
     And,
     Or,
     Not,
+    Plus,
     Colon,
     Comma,
     EOF

@@ -30,7 +30,22 @@ impl std::error::Error for ParseError {}
 type ParseResult<T> = Result<T, ParseError>;
 
 fn parse_expression(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
-    parse_logical_or(tokens, i)
+    parse_concatenation(tokens, i)
+}
+
+fn parse_concatenation(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    let mut left = parse_logical_or(tokens, i)?;
+
+    while *i < tokens.len() && matches!(tokens[*i], Token::Plus) {
+        *i += 1; // skip '+'
+        let right = parse_logical_or(tokens, i)?;
+        left = Expression::Concat {
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
 }
 
 fn parse_logical_or(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {

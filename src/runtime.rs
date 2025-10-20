@@ -274,6 +274,11 @@ pub fn eval_expression(
                 UnaryOperator::Not => (!is_truthy(&val)).to_string(),
             }
         }
+        Expression::Concat { left, right } => {
+            let left_val = eval_expression(left, message, client, vars);
+            let right_val = eval_expression(right, message, client, vars);
+            format!("{}{}", left_val, right_val)
+        }
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");
             "".to_string()

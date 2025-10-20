@@ -74,6 +74,26 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
 
     while let Some(c) = chars.next() {
         match c {
+            '/' => {
+                if let Some(&'/') = chars.peek() {
+                    // Single-line comment, skip until end of line
+                    chars.next(); // consume second '/'
+                    while let Some(ch) = chars.peek() {
+                        if *ch == '\n' {
+                            break;
+                        }
+                        chars.next();
+                        column += 1;
+                    }
+                    column += 2; // account for the '//'
+                } else {
+                    return Err(LexError::UnexpectedCharacter {
+                        line,
+                        column,
+                        character: c,
+                    });
+                }
+            }
             '{' => {
                 tokens.push(Token::LBrace);
                 column += 1;
@@ -100,6 +120,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
             }
             ',' => {
                 tokens.push(Token::Comma);
+                column += 1;
+            }
+            '+' => {
+                tokens.push(Token::Plus);
                 column += 1;
             }
             '=' => {
