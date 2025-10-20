@@ -1,8 +1,11 @@
 server tcp ":9009" {
+	on connect {
+		set asd = "dsa"
+	}
 	on message {
 		if $message == "admin" {
 			if $client > 5000 {
-				send("Admin from high port")
+				send("Admin from high port $asd")
 			} else {
 				send("Admin from low port")
 			}

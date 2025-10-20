@@ -48,7 +48,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "starts_with" => match arg {
+        "starts_with" | "startsWith" => match arg {
             Some(Expression::String(arg)) if arg != "" => {
                 base.starts_with(arg).to_string()
             }
@@ -61,7 +61,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "ends_with" => match arg {
+        "ends_with" | "endsWith" => match arg {
             Some(Expression::String(arg)) if arg != "" => {
                 base.ends_with(arg).to_string()
             }
@@ -96,7 +96,7 @@ fn apply_method(
             Some(Expression::Number(n)) => base.repeat(*n as usize),
             _ => base.repeat(2),
         },
-        "repeat_sep" => match arg {
+        "repeat_sep" | "repeatSep" => match arg {
             Some(Expression::Tuple(args_vec)) if args_vec.len() == 2 => {
                 let times_str = eval_expression(&args_vec[0], message, client, vars);
                 let add = eval_expression(&args_vec[1], message, client, vars);
@@ -162,7 +162,7 @@ fn apply_method(
                 base.to_string()
             }
         },
-        "is_empty" => base.is_empty().to_string(),
+        "is_empty" | "isEmpty" => base.is_empty().to_string(),
         "typeof" | "type_of" => {
             if base.parse::<f64>().is_ok() {
                 "number".to_string()
