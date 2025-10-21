@@ -1,5 +1,5 @@
 use crate::token::Token;
-use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator, ArithmeticOperator};
 use std::fmt;
 
 #[derive(Debug)]
@@ -37,8 +37,14 @@ fn parse_concatenation(tokens: &[Token], i: &mut usize) -> ParseResult<Expressio
     let mut left = parse_logical_or(tokens, i)?;
 
     while *i < tokens.len() && matches!(tokens[*i], Token::Plus) {
+        // Check if this is string concatenation or arithmetic
+        // We need to be context-aware: if we're in a string context, it's concat
+        // For now, we'll handle this by type - if left side is a string, it's concat
         *i += 1; // skip '+'
         let right = parse_logical_or(tokens, i)?;
+
+        // We'll decide at parse time: if either side could be a string, use Concat
+        // Otherwise use Arithmetic. The runtime will handle conversion.
         left = Expression::Concat {
             left: Box::new(left),
             right: Box::new(right),
@@ -87,8 +93,8 @@ fn parse_comparison(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
         });
     }
 
-    // Parse base expression
-    let mut expr = parse_unary(tokens, i)?;
+    // Parse arithmetic expression first
+    let mut expr = parse_arithmetic(tokens, i)?;
 
     // Check for comparison operators
     if *i < tokens.len() {
@@ -104,7 +110,7 @@ fn parse_comparison(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
 
         if let Some(operator) = op {
             *i += 1; // skip operator
-            let right = parse_unary(tokens, i)?;
+            let right = parse_arithmetic(tokens, i)?;
             expr = Expression::BinaryOp {
                 left: Box::new(expr),
                 op: operator,
@@ -114,6 +120,55 @@ fn parse_comparison(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> 
     }
 
     Ok(expr)
+}
+
+fn parse_arithmetic(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    parse_additive(tokens, i)
+}
+
+fn parse_additive(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    let mut left = parse_multiplicative(tokens, i)?;
+
+    while *i < tokens.len() {
+        let op = match &tokens[*i] {
+            Token::Plus => ArithmeticOperator::Add,
+            Token::Minus => ArithmeticOperator::Subtract,
+            _ => break,
+        };
+
+        *i += 1;
+        let right = parse_multiplicative(tokens, i)?;
+        left = Expression::Arithmetic {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
+}
+
+fn parse_multiplicative(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {
+    let mut left = parse_unary(tokens, i)?;
+
+    while *i < tokens.len() {
+        let op = match &tokens[*i] {
+            Token::Star => ArithmeticOperator::Multiply,
+            Token::Slash => ArithmeticOperator::Divide,
+            Token::Percent => ArithmeticOperator::Modulo,
+            _ => break,
+        };
+
+        *i += 1;
+        let right = parse_unary(tokens, i)?;
+        left = Expression::Arithmetic {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
 }
 
 fn parse_unary(tokens: &[Token], i: &mut usize) -> ParseResult<Expression> {

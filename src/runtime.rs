@@ -1,4 +1,4 @@
-use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::{Statement, Expression, BinaryOperator, LogicalOperator, UnaryOperator, ArithmeticOperator};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
@@ -278,6 +278,65 @@ pub fn eval_expression(
             let left_val = eval_expression(left, message, client, vars);
             let right_val = eval_expression(right, message, client, vars);
             format!("{}{}", left_val, right_val)
+        }
+        Expression::Arithmetic { left, op, right } => {
+            let left_val = eval_expression(left, message, client, vars);
+            let right_val = eval_expression(right, message, client, vars);
+
+            match op {
+                ArithmeticOperator::Add => {
+                    // Try numeric addition first
+                    if let (Ok(l), Ok(r)) = (left_val.parse::<f64>(), right_val.parse::<f64>()) {
+                        let result = l + r;
+                        if result.fract() == 0.0 {
+                            format!("{}", result as i64)
+                        } else {
+                            format!("{}", result)
+                        }
+                    } else {
+                        // Fallback to string concatenation
+                        format!("{}{}", left_val, right_val)
+                    }
+                }
+                ArithmeticOperator::Subtract => {
+                    if let (Ok(l), Ok(r)) = (left_val.parse::<f64>(), right_val.parse::<f64>()) {
+                        format!("{}", l - r)
+                    } else {
+                        "NaN".into()
+                    }
+                }
+                ArithmeticOperator::Multiply => {
+                    if let (Ok(l), Ok(r)) = (left_val.parse::<f64>(), right_val.parse::<f64>()) {
+                        format!("{}", l * r)
+                    } else {
+                        "NaN".into()
+                    }
+                }
+                ArithmeticOperator::Divide => {
+                    if let (Ok(l), Ok(r)) = (left_val.parse::<f64>(), right_val.parse::<f64>()) {
+                        if r == 0.0 {
+                            eprintln!("Warning: division by zero");
+                            "NaN".into()
+                        } else {
+                            format!("{}", l / r)
+                        }
+                    } else {
+                        "NaN".into()
+                    }
+                }
+                ArithmeticOperator::Modulo => {
+                    if let (Ok(l), Ok(r)) = (left_val.parse::<f64>(), right_val.parse::<f64>()) {
+                        if r == 0.0 {
+                            eprintln!("Warning: modulo by zero");
+                            "NaN".into()
+                        } else {
+                            format!("{}", l % r)
+                        }
+                    } else {
+                        "NaN".into()
+                    }
+                }
+            }
         }
         Expression::Tuple(_) => {
             eprintln!("Warning: unexpected tuple expression at top level");

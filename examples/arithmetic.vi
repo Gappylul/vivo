@@ -1,0 +1,10 @@
+server tcp ":8080" {
+    on connect {
+        set count = 5
+        set a = 12
+        set b = 20
+        log("Count + 1 = ${count + 1}")        // Will evaluate to "Count + 1 = 6"
+        log("Complex: ${(count + 5) * 2}")     // Will evaluate to "Complex: 20"
+        send("Result: " + (a + b) + " " + "wow".upper().repeat(4))              // Concatenation works too
+    }
+}

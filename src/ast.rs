@@ -53,6 +53,11 @@ pub enum Expression {
         left: Box<Expression>,
         right: Box<Expression>,
     },
+    Arithmetic {
+        left: Box<Expression>,
+        op: ArithmeticOperator,
+        right: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,4 +79,13 @@ pub enum LogicalOperator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperator {
     Not,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArithmeticOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
 }

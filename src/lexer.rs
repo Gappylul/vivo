@@ -15,10 +15,18 @@ impl fmt::Display for LexError {
                 write!(f, "Unterminated string at line {}, column {}", line, column)
             }
             LexError::InvalidEscape { line, column, character } => {
-                write!(f, "Invalid escape sequence '\\{}' at line {}, column {}", character, line, column)
+                write!(
+                    f,
+                    "Invalid escape sequence '\\{}' at line {}, column {}",
+                    character, line, column
+                )
             }
             LexError::UnexpectedCharacter { line, column, character } => {
-                write!(f, "Unexpected character '{}' at line {}, column {}", character, line, column)
+                write!(
+                    f,
+                    "Unexpected character '{}' at line {}, column {}",
+                    character, line, column
+                )
             }
         }
     }
@@ -32,7 +40,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
     let mut line = 1;
     let mut column = 1;
 
-    fn read_ident(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>, column: &mut usize) -> String {
+    fn read_ident(
+        chars: &mut std::iter::Peekable<impl Iterator<Item = char>>,
+        column: &mut usize,
+    ) -> String {
         let mut ident = String::new();
         while let Some(&c) = chars.peek() {
             if c.is_alphanumeric() || c == '_' {
@@ -56,8 +67,6 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 s.push(c);
                 chars.next();
                 *column += 1;
-
-                // Read method name
                 while let Some(&m) = chars.peek() {
                     s.push(m);
                     chars.next();
@@ -76,8 +85,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
         match c {
             '/' => {
                 if let Some(&'/') = chars.peek() {
-                    // Single-line comment, skip until end of line
-                    chars.next(); // consume second '/'
+                    // Line comment
+                    chars.next();
                     while let Some(ch) = chars.peek() {
                         if *ch == '\n' {
                             break;
@@ -85,47 +94,22 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                         chars.next();
                         column += 1;
                     }
-                    column += 2; // account for the '//'
                 } else {
-                    return Err(LexError::UnexpectedCharacter {
-                        line,
-                        column,
-                        character: c,
-                    });
+                    tokens.push(Token::Slash);
+                    column += 1;
                 }
             }
-            '{' => {
-                tokens.push(Token::LBrace);
-                column += 1;
-            }
-            '}' => {
-                tokens.push(Token::RBrace);
-                column += 1;
-            }
-            '(' => {
-                tokens.push(Token::LParen);
-                column += 1;
-            }
-            ')' => {
-                tokens.push(Token::RParen);
-                column += 1;
-            }
-            ':' => {
-                tokens.push(Token::Colon);
-                column += 1;
-            }
-            '.' => {
-                tokens.push(Token::Dot);
-                column += 1;
-            }
-            ',' => {
-                tokens.push(Token::Comma);
-                column += 1;
-            }
-            '+' => {
-                tokens.push(Token::Plus);
-                column += 1;
-            }
+            '{' => tokens.push(Token::LBrace),
+            '}' => tokens.push(Token::RBrace),
+            '(' => tokens.push(Token::LParen),
+            ')' => tokens.push(Token::RParen),
+            ':' => tokens.push(Token::Colon),
+            '.' => tokens.push(Token::Dot),
+            ',' => tokens.push(Token::Comma),
+            '+' => tokens.push(Token::Plus),
+            '-' => tokens.push(Token::Minus),
+            '*' => tokens.push(Token::Star),
+            '%' => tokens.push(Token::Percent),
             '=' => {
                 if let Some(&'=') = chars.peek() {
                     chars.next();
@@ -142,11 +126,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     tokens.push(Token::And);
                     column += 2;
                 } else {
-                    return Err(LexError::UnexpectedCharacter {
-                        line,
-                        column,
-                        character: c,
-                    });
+                    return Err(LexError::UnexpectedCharacter { line, column, character: c });
                 }
             }
             '|' => {
@@ -155,11 +135,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     tokens.push(Token::Or);
                     column += 2;
                 } else {
-                    return Err(LexError::UnexpectedCharacter {
-                        line,
-                        column,
-                        character: c,
-                    });
+                    return Err(LexError::UnexpectedCharacter { line, column, character: c });
                 }
             }
             '!' => {
@@ -192,6 +168,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                     column += 1;
                 }
             }
+
+            // String literal
             '"' => {
                 let string_start_line = line;
                 let string_start_column = column;
@@ -201,14 +179,12 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
 
                 while let Some(ch) = chars.next() {
                     column += 1;
-
                     match ch {
                         '"' => {
                             terminated = true;
                             break;
                         }
                         '\n' => {
-                            // Strings cannot span multiple lines
                             return Err(LexError::UnterminatedString {
                                 line: string_start_line,
                                 column: string_start_column,
@@ -238,15 +214,41 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                                 });
                             }
                         }
-                        '$' => {
-                            let mut var_expr = String::from("$");
-                            var_expr.push_str(&read_ident(&mut chars, &mut column));
-                            read_method_chain(&mut chars, &mut var_expr, &mut column);
 
-                            s.push_str("{{");
-                            s.push_str(&var_expr);
-                            s.push_str("}}");
+                        // Interpolation-like support for `${}` or `$ident.method()`
+                        '$' => {
+                            if chars.peek() == Some(&'{') {
+                                // ${ ... }
+                                s.push_str("{{$");
+                                chars.next(); // consume '{'
+                                column += 1;
+                                s.push('{');
+                                let mut depth = 1;
+                                while let Some(next_ch) = chars.next() {
+                                    column += 1;
+                                    if next_ch == '{' {
+                                        depth += 1;
+                                    } else if next_ch == '}' {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            s.push('}');
+                                            s.push_str("}");
+                                            break;
+                                        }
+                                    }
+                                    s.push(next_ch);
+                                }
+                            } else {
+                                // $var or $var.method()
+                                let mut var_expr = String::from("$");
+                                var_expr.push_str(&read_ident(&mut chars, &mut column));
+                                read_method_chain(&mut chars, &mut var_expr, &mut column);
+                                s.push_str("{{");
+                                s.push_str(&var_expr);
+                                s.push_str("}}");
+                            }
                         }
+
                         _ => s.push(ch),
                     }
                 }
@@ -257,21 +259,21 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                         column: string_start_column,
                     });
                 }
-
                 tokens.push(Token::String(s));
             }
 
+            // Variables outside strings
             '$' => {
                 column += 1;
-                let var = String::from(&read_ident(&mut chars, &mut column));
+                let var = read_ident(&mut chars, &mut column);
                 tokens.push(Token::Variable(var));
             }
 
+            // Identifiers and keywords
             c if c.is_alphabetic() => {
                 let mut ident = String::from(c);
                 column += 1;
                 ident.push_str(&read_ident(&mut chars, &mut column));
-
                 tokens.push(match ident.as_str() {
                     "server" => Token::Server,
                     "tcp" => Token::TCP,
@@ -285,6 +287,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 });
             }
 
+            // Numbers
             c if c.is_ascii_digit() => {
                 let mut num = c.to_string();
                 column += 1;
@@ -305,20 +308,12 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexError> {
                 column = 1;
             }
 
-            c if c.is_whitespace() => {
-                column += 1;
-            }
+            c if c.is_whitespace() => column += 1,
+
+            c if c == ',' || c == ';' => column += 1,
 
             c => {
-                if c == ',' || c == ';' {
-                    column += 1;
-                } else {
-                    return Err(LexError::UnexpectedCharacter {
-                        line,
-                        column,
-                        character: c,
-                    });
-                }
+                return Err(LexError::UnexpectedCharacter { line, column, character: c });
             }
         }
     }

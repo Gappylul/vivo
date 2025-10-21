@@ -28,6 +28,10 @@ pub enum Token {
     Or,
     Not,
     Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
     Colon,
     Comma,
     EOF
