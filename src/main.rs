@@ -1,4 +1,5 @@
 use std::{env, fs};
+use std::path::Path;
 
 mod token;
 mod lexer;
@@ -17,8 +18,20 @@ async fn main() {
         return;
     }
 
-    let src = fs::read_to_string(&args[1])
-        .expect("Failed to read source file");
+    let path = Path::new(&args[1]);
+
+    if path.extension().and_then(|ext| ext.to_str()) != Some("vi") {
+        eprintln!("Error: only .vi files are supported");
+        return;
+    }
+
+    let src = match fs::read_to_string(path) {
+        Ok(src) => src,
+        Err(e) => {
+            eprintln!("Error: failed to read '{}': {}", path.display(), e);
+            return;
+        }
+    };
 
     let tokens = match lexer::lex(&src) {
         Ok(tokens) => tokens,
